@@ -16,6 +16,7 @@
     savePromise: null,
     toastTimer: null,
     observer: null,
+    chartSignature: null,
   };
   const riskLabels = { high: 'Высокий', medium: 'Средний', low: 'Низкий', unrated: 'Нет оценки' };
   const serviceStatusLabels = {
@@ -24,6 +25,7 @@
   const paymentLabels = { hour: 'почасово', week: 'еженедельно', month: 'ежемесячно', quarter_year: 'раз в три месяца', half_year: 'раз в полгода', year: 'ежегодно' };
   const money = cents => new Intl.NumberFormat('ru-RU', { style: 'currency', currency: 'EUR', minimumFractionDigits: 2, maximumFractionDigits: 2 }).format((Number(cents) || 0) / 100);
   const integer = value => new Intl.NumberFormat('ru-RU', { maximumFractionDigits: 0 }).format(Number(value) || 0);
+  const customerWord = value => ({ one: 'клиент', few: 'клиента', many: 'клиентов', other: 'клиентов' })[new Intl.PluralRules('ru-RU').select(Number(value) || 0)];
   const escapeHTML = value => String(value ?? '').replace(/[&<>"']/g, character => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[character]);
 
   class ApiError extends Error {
@@ -119,6 +121,7 @@
 
   function updateChart(forecast) {
     const counts = forecast?.counts || [0, 0, 0, 0, 0];
+    const signature = counts.join(',');
     const maxValue = Math.max(4, ...counts);
     const axisMax = Math.ceil(maxValue / 4) * 4;
     const axisSteps = [axisMax, axisMax * .75, axisMax * .5, axisMax * .25, 0];
@@ -135,6 +138,15 @@
     $('#chartEnd').setAttribute('cx', String(x(4)));
     $('#chartEnd').setAttribute('cy', String(y(counts[4] || 0)));
     $('#trendChart').setAttribute('aria-label', `Сейчас ${integer(current)} услуг на продлении; к сроку 30 дней ожидается ${integer(counts[4] || 0)} услуг.`);
+    if (state.chartSignature !== null && state.chartSignature !== signature) {
+      const plot = $('.chart-plot');
+      plot.classList.remove('is-updating');
+      requestAnimationFrame(() => {
+        plot.classList.add('is-updating');
+        setTimeout(() => plot.classList.remove('is-updating'), 320);
+      });
+    }
+    state.chartSignature = signature;
   }
 
   function renderSummary(data) {
@@ -165,7 +177,7 @@
 
   function renderCustomers(result) {
     state.customers = result.items;
-    $('#tableCount').textContent = `${integer(result.total)} клиентов`;
+    $('#tableCount').textContent = `${integer(result.total)} ${customerWord(result.total)}`;
     const first = result.total ? state.offset + 1 : 0;
     const last = Math.min(state.offset + result.items.length, result.total);
     $('#pagePosition').textContent = `${integer(first)}–${integer(last)} из ${integer(result.total)}`;
@@ -289,6 +301,7 @@
   async function openCustomer(id) {
     try {
       const customer = await api(`/api/v1/customers/${encodeURIComponent(id)}`);
+      $$('#customerRows tr').forEach(row => row.classList.toggle('is-selected', Boolean(row.querySelector(`[data-customer="${CSS.escape(String(id))}"]`))));
       renderCustomerDetail(customer);
       $('#customerDialog').showModal();
     } catch (error) {
@@ -373,6 +386,7 @@
     const button = $('#uploadButton');
     const label = $('#uploadLabel');
     button.setAttribute('aria-busy', 'true');
+    button.disabled = true;
     label.textContent = 'Загружаем…';
     try {
       const contents = JSON.parse(await file.text());
@@ -385,6 +399,7 @@
       showToast(`Не удалось загрузить снимок: ${error.message}`, { persistent: true });
     } finally {
       button.removeAttribute('aria-busy');
+      button.disabled = false;
       label.textContent = 'Загрузить снимок';
       $('#snapshotFile').value = '';
     }
@@ -397,6 +412,7 @@
     $('#themeToggle').addEventListener('click', () => applyTheme(document.documentElement.dataset.theme === 'dark' ? 'light' : 'dark'));
     $('#riskFilter').addEventListener('change', event => {
       state.risk = event.target.value;
+      event.target.classList.toggle('is-filtered', Boolean(state.risk));
       state.offset = 0;
       refresh().catch(error => showToast(`Не удалось отфильтровать клиентов: ${error.message}`, { persistent: true }));
     });
@@ -455,6 +471,7 @@
     $('#logoutButton').addEventListener('click', logout);
     $('#logoutButtonMobile').addEventListener('click', logout);
     $('.close-dialog').addEventListener('click', () => $('#customerDialog').close());
+    $('#customerDialog').addEventListener('close', () => $$('#customerRows tr.is-selected').forEach(row => row.classList.remove('is-selected')));
     $('#customerDialog').addEventListener('click', event => {
       if (event.target === event.currentTarget) event.currentTarget.close();
     });
