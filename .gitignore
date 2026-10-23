@@ -13,3 +13,8 @@ agy.exe
 data/*.db
 data/*.db-shm
 data/*.db-wal
+
+# Local task instructions (keep out of the public repository)
+/skill.md
+/SKILL (2).md
+/Задача (1).md
