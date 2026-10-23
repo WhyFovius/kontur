@@ -1,0 +1,377 @@
+openapi: 3.1.0
+info:
+  title: Churn Risk API
+  version: 2.0.0
+  description: >-
+    Explainable customer churn-risk prioritization. Money values in customer and
+    snapshot payloads are integer eurocents. This is a heuristic score, not a
+    calibrated probability.
+servers:
+  - url: http://localhost:8000
+tags:
+  - name: Authentication
+  - name: Customers
+  - name: Analytics
+  - name: Model
+  - name: Source
+paths:
+  /api/v1/auth/login:
+    post:
+      tags: [Authentication]
+      summary: Create an administrator session
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/LoginRequest' }
+      responses:
+        '200':
+          description: Session created; an HttpOnly cookie is set.
+          headers:
+            Set-Cookie:
+              schema: { type: string }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/LoginResponse' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '422': { $ref: '#/components/responses/ValidationError' }
+        '429':
+          description: Login rate limit exceeded.
+          headers:
+            Retry-After:
+              schema: { type: integer }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+  /api/v1/auth/me:
+    get:
+      tags: [Authentication]
+      summary: Return the current administrator
+      security: [{ AdminSession: [] }]
+      responses:
+        '200':
+          description: Current session identity.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [username]
+                properties:
+                  username: { type: string }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+  /api/v1/auth/logout:
+    post:
+      tags: [Authentication]
+      summary: Revoke the current session
+      security: [{ AdminSession: [] }]
+      responses:
+        '200':
+          description: Session revoked.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ok: { type: boolean, const: true }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+  /api/v1/customers:
+    get:
+      tags: [Customers]
+      summary: List customers with risk analysis
+      security: [{ AdminSession: [] }]
+      parameters:
+        - in: query
+          name: risk
+          schema: { type: string, enum: [high, medium, low, unrated] }
+        - in: query
+          name: sort
+          schema: { type: string, enum: [id, email, balance, totalReplenished, score], default: score }
+        - in: query
+          name: order
+          schema: { type: string, enum: [asc, desc], default: desc }
+        - in: query
+          name: limit
+          schema: { type: integer, minimum: 1, maximum: 1000, default: 500 }
+        - in: query
+          name: offset
+          schema: { type: integer, minimum: 0, default: 0 }
+      responses:
+        '200':
+          description: Page of sanitized customer projections.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items, total]
+                properties:
+                  items:
+                    type: array
+                    items: { $ref: '#/components/schemas/Customer' }
+                  total: { type: integer, minimum: 0 }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '422': { $ref: '#/components/responses/ValidationError' }
+  /api/v1/customers/{customer_id}:
+    get:
+      tags: [Customers]
+      summary: Get one customer's risk analysis
+      security: [{ AdminSession: [] }]
+      parameters:
+        - in: path
+          name: customer_id
+          required: true
+          schema: { type: string }
+      responses:
+        '200':
+          description: Sanitized customer projection.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Customer' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404':
+          description: Customer not found.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+  /api/v1/analytics/summary:
+    get:
+      tags: [Analytics]
+      summary: Get aggregate risk and revenue metrics
+      security: [{ AdminSession: [] }]
+      responses:
+        '200':
+          description: Current analytics summary.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AnalyticsSummary' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+  /api/v1/model/settings:
+    get:
+      tags: [Model]
+      summary: Get model weights, labels and risk thresholds
+      security: [{ AdminSession: [] }]
+      responses:
+        '200':
+          description: Current persisted model configuration.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ModelSettings' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+    patch:
+      tags: [Model]
+      summary: Update one or more feature weights
+      security: [{ AdminSession: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [weights]
+              additionalProperties: false
+              properties:
+                weights:
+                  type: object
+                  minProperties: 1
+                  maxProperties: 64
+                  additionalProperties: { type: number, minimum: 0, maximum: 100 }
+      responses:
+        '200':
+          description: Updated model configuration.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ModelSettings' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '422': { $ref: '#/components/responses/ValidationError' }
+  /api/v1/source/snapshot:
+    put:
+      tags: [Source]
+      summary: Atomically replace the source snapshot
+      description: >-
+        Validates the entire snapshot before replacing current data. Request
+        body is limited to 32 MiB. Every relation must reference an account;
+        monetary fields use integer eurocents.
+      security: [{ AdminSession: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/Snapshot' }
+      responses:
+        '200':
+          description: Snapshot accepted and stored.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [ok, accountCount]
+                properties:
+                  ok: { type: boolean, const: true }
+                  accountCount: { type: integer, minimum: 0 }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '413':
+          description: Request body exceeds the configured size limit.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '422': { $ref: '#/components/responses/ValidationError' }
+  /metrics:
+    get:
+      tags: [Analytics]
+      summary: Export aggregate metrics in Prometheus text format
+      description: Public endpoint; exports aggregate counts and estimated loss without personal data.
+      responses:
+        '200':
+          description: Prometheus text exposition format.
+          content:
+            text/plain:
+              schema: { type: string }
+components:
+  securitySchemes:
+    AdminSession:
+      type: apiKey
+      in: cookie
+      name: churn_session
+      description: HttpOnly session cookie returned by the login endpoint.
+  responses:
+    Unauthorized:
+      description: A valid administrator session is required.
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+    ValidationError:
+      description: Request validation failed.
+      content:
+        application/json:
+          schema:
+            type: object
+            properties:
+              detail: {}
+  schemas:
+    Error:
+      type: object
+      properties:
+        detail: { type: string }
+    LoginRequest:
+      type: object
+      additionalProperties: false
+      required: [username, password]
+      properties:
+        username: { type: string, minLength: 1, maxLength: 128 }
+        password: { type: string, minLength: 1, maxLength: 256, format: password }
+    LoginResponse:
+      type: object
+      required: [username, expiresAt]
+      properties:
+        username: { type: string }
+        expiresAt: { type: string, format: date-time }
+    Customer:
+      type: object
+      required: [id, email, balance, totalReplenished, score, riskLevel, reasons, services, features, estimatedLoss, monthlyRevenue]
+      properties:
+        id: { type: string }
+        email: { type: string }
+        balance: { type: number, description: Integer eurocents in the source data. }
+        availableBalance: { type: [number, 'null'], description: Eurocents; includes usable bonus balance. }
+        totalReplenished: { type: number, description: Eurocents. }
+        score: { type: [integer, 'null'], minimum: 0, maximum: 100 }
+        riskLevel: { type: string, enum: [high, medium, low, unrated] }
+        reasons: { type: array, items: { type: string } }
+        services:
+          type: array
+          items:
+            type: object
+            properties:
+              id: { type: string }
+              name: { type: string }
+              status: { type: string, enum: [active, suspended, prolong_wait, deleted, blocked] }
+              price: { type: number, description: Eurocents. }
+              paymentTerm: { type: string, enum: [hour, week, month, quarter_year, half_year, year] }
+              autoprolong: { type: boolean }
+              expiresAt: { type: [string, 'null'], format: date-time }
+        features: { type: object, additionalProperties: { type: boolean } }
+        estimatedLoss: { type: integer, description: Three-month potential loss in eurocents. }
+        monthlyRevenue: { type: integer, description: Estimated monthly revenue in eurocents. }
+        daysToExpiry: { type: [number, 'null'] }
+    AnalyticsSummary:
+      type: object
+      required: [customerCount, ratedCount, unratedCount, highRisk, mediumRisk, lowRisk, estimatedLoss, monthlyRevenueAtRisk, atRiskServices, churnForecast, currency, unit]
+      properties:
+        customerCount: { type: integer }
+        ratedCount: { type: integer }
+        unratedCount: { type: integer }
+        highRisk: { type: integer }
+        mediumRisk: { type: integer }
+        lowRisk: { type: integer }
+        estimatedLoss: { type: integer, description: Eurocents. }
+        monthlyRevenueAtRisk: { type: integer, description: Eurocents. }
+        atRiskServices: { type: integer }
+        churnForecast:
+          type: object
+          required: [days, counts]
+          properties:
+            days: { type: array, items: { type: integer } }
+            counts: { type: array, items: { type: integer } }
+        currency: { type: string, const: EUR }
+        unit: { type: string, const: eurocents }
+    ModelSettings:
+      type: object
+      required: [weights, features, thresholds, horizonMonths]
+      properties:
+        weights: { type: object, additionalProperties: { type: number, minimum: 0, maximum: 100 } }
+        features: { type: object, additionalProperties: { type: string } }
+        thresholds:
+          type: object
+          properties:
+            medium: { type: integer, const: 35 }
+            high: { type: integer, const: 65 }
+        horizonMonths: { type: integer, const: 3 }
+    Snapshot:
+      type: object
+      additionalProperties: false
+      properties:
+        accounts:
+          type: array
+          maxItems: 100000
+          items:
+            type: object
+            required: [id]
+            properties:
+              id: { type: [string, integer] }
+              email: { type: string, maxLength: 320 }
+              balance: { type: integer, minimum: 0, description: Eurocents. }
+              withdrawBalance: { type: integer, minimum: 0, description: Eurocents. }
+              bonusBalance: { type: integer, minimum: 0, description: Eurocents. }
+              bonusState: { type: boolean }
+              totalReplenished: { type: integer, minimum: 0, description: Eurocents. }
+        users:
+          type: array
+          description: Legacy alias for accounts.
+          items: { type: object }
+        services:
+          type: array
+          maxItems: 500000
+          items:
+            type: object
+            required: [id, status]
+            properties:
+              id: { type: [string, integer] }
+              accountId: { type: [string, integer] }
+              userId: { type: [string, integer], description: Legacy account relation alias. }
+              account_id: { type: [string, integer], description: Legacy account relation alias. }
+              status: { type: string, enum: [active, suspended, prolong_wait, deleted, blocked] }
+              price: { type: integer, minimum: 0, description: Eurocents. }
+              paymentTerm: { type: string, enum: [hour, week, month, quarter_year, half_year, year] }
+        transactions:
+          type: array
+          maxItems: 1000000
+          items:
+            type: object
+            required: [id, status, type]
+            properties:
+              id: { type: [string, integer] }
+              accountId: { type: [string, integer] }
+              userId: { type: [string, integer] }
+              account_id: { type: [string, integer] }
+              status: { type: string, enum: [performed, not_performed] }
+              type: { type: string, enum: [prolong, order] }
+              amount: { type: integer, minimum: 0, description: Eurocents. }

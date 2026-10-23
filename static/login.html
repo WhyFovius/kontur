@@ -1,0 +1,54 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Вход · Контур аналитики</title>
+  <script src="/static/theme-init.js?v=1"></script>
+  <link rel="stylesheet" href="/static/login.css?v=1">
+  <script src="/static/login.js?v=1" defer></script>
+</head>
+<body class="login-page">
+  <main class="login-shell">
+    <section class="login-brand" aria-labelledby="brandTitle">
+      <a class="brand-lockup" href="/login" aria-label="Контур аналитики">
+        <span class="brand-mark" aria-hidden="true"><i></i><i></i><i></i></span>
+        <span class="brand-name">контур <span>/ удержание</span></span>
+      </a>
+      <div class="login-hero">
+        <span class="eyebrow"><span class="eyebrow-line"></span>АНАЛИТИКА УДЕРЖАНИЯ</span>
+        <h1 id="brandTitle">Заметить риск.<br><em>Удержать клиента.</em></h1>
+        <p>Приоритеты команды, понятные причины оттока и потенциальная выручка — в одном рабочем пространстве.</p>
+      </div>
+      <div class="login-note"><span class="note-signal" aria-hidden="true"></span><span>Модель пересчитывается при обновлении снимка</span></div>
+      <div class="login-orbit orbit-one" aria-hidden="true"></div>
+      <div class="login-orbit orbit-two" aria-hidden="true"></div>
+    </section>
+    <section class="login-form-wrap" aria-labelledby="loginTitle">
+      <form id="loginForm" class="login-form">
+        <div class="form-heading">
+          <span class="eyebrow">РАБОЧЕЕ ПРОСТРАНСТВО</span>
+          <h2 id="loginTitle">Войти в Контур</h2>
+          <p>Используйте учётные данные администратора.</p>
+        </div>
+        <div class="form-field">
+          <label for="username">Логин</label>
+          <input id="username" name="username" type="text" autocomplete="username" spellcheck="false" required maxlength="128" placeholder="Введите логин">
+        </div>
+        <div class="form-field">
+          <label for="password">Пароль</label>
+          <input id="password" name="password" type="password" autocomplete="current-password" required maxlength="256" placeholder="Введите пароль">
+        </div>
+        <p id="loginError" class="form-error" role="alert" aria-live="assertive" hidden></p>
+        <button id="loginButton" class="login-submit" type="submit">
+          <span class="submit-label">Войти в панель</span>
+          <span class="submit-arrow" aria-hidden="true">↗</span>
+          <span class="submit-spinner" aria-hidden="true" hidden></span>
+        </button>
+        <p class="login-footnote"><svg viewBox="0 0 20 20" aria-hidden="true"><rect x="3.5" y="8.5" width="13" height="9" rx="2"/><path d="M6.5 8.5V6a3.5 3.5 0 0 1 7 0v2.5"/></svg>Сессия хранится в защищённой cookie</p>
+      </form>
+      <footer class="login-footer"><span>Контур · Аналитика удержания</span><span>Доступ по приглашению</span></footer>
+    </section>
+  </main>
+</body>
+</html>
