@@ -87,6 +87,7 @@
     if (persist) {
       try { localStorage.setItem('churn-theme', isDark ? 'dark' : 'light'); } catch { /* Storage may be unavailable in private contexts. */ }
     }
+    if (state.summary) updateDonut(state.summary);
   }
 
   function setAnimatedText(selector, value) {
@@ -98,7 +99,7 @@
     node.classList.remove('value-update');
     requestAnimationFrame(() => {
       node.classList.add('value-update');
-      setTimeout(() => node.classList.remove('value-update'), 300);
+      setTimeout(() => node.classList.remove('value-update'), 320);
     });
   }
 
@@ -108,8 +109,8 @@
     setAnimatedText('#donutTotal', integer(total));
     ['#legendHigh', '#legendMedium', '#legendLow', '#legendUnrated'].forEach((selector, index) => { $(selector).textContent = integer(levels[index]); });
     const styles = getComputedStyle(document.documentElement);
-    const colors = ['--md-risk-high', '--md-risk-medium', '--md-risk-low', '--md-risk-unrated']
-      .map(token => styles.getPropertyValue(token).trim());
+    const colors = ['--md-risk-high-accent', '--md-risk-medium-accent', '--md-risk-low-accent', '--md-risk-unrated-accent']
+      .map(token => styles.getPropertyValue(token).trim() || styles.getPropertyValue(token.replace('-accent', '')).trim());
     let angle = 0;
     const segments = levels.map((value, index) => {
       const start = angle;

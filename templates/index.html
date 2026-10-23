@@ -7,9 +7,9 @@
   <link rel="icon" href="/static/favicon.svg" type="image/svg+xml">
   <script src="/static/theme-init.js?v=1"></script>
   <link rel="preload" href="/static/fonts/Manrope-Cyrillic.woff2" as="font" type="font/woff2" crossorigin>
-  <link rel="stylesheet" href="/static/design-tokens.css?v=2">
-  <link rel="stylesheet" href="/static/dashboard.css?v=6">
-  <link rel="stylesheet" href="/static/ui-redesign.css?v=2">
+  <link rel="stylesheet" href="/static/design-tokens.css?v=20">
+  <link rel="stylesheet" href="/static/dashboard.css?v=20">
+  <link rel="stylesheet" href="/static/ui-redesign.css?v=20">
 </head>
 <body>
   <a class="skip-link" href="#mainContent">Перейти к содержимому</a>
@@ -164,7 +164,19 @@
             <div class="panel-heading"><div><span class="eyebrow">ПО СРОКАМ УСЛУГ</span><h2>Продления на горизонте 30 дней</h2></div></div>
             <div class="chart-legend"><span><i class="fact-swatch"></i>Сейчас</span><span><i class="forecast-swatch"></i>К сроку</span></div>
             <div class="chart-area"><div class="chart-axis"><span>12</span><span>9</span><span>6</span><span>3</span><span>0</span></div><div class="chart-plot"><div class="chart-gridlines"><i></i><i></i><i></i><i></i><i></i></div>
-              <svg id="trendChart" viewBox="0 0 800 180" role="img" aria-label="Число услуг по срокам окончания" aria-describedby="forecastDescription" preserveAspectRatio="none"><path id="chartArea" d=""></path><path id="chartFact" fill="none" stroke-width="3" stroke-linecap="round" d=""></path><path id="chartForecast" fill="none" stroke-width="3" stroke-dasharray="7 7" stroke-linecap="round" d=""></path><circle id="chartStart" r="4"></circle><circle id="chartEnd" r="4"></circle></svg>
+              <svg id="trendChart" viewBox="0 0 800 180" role="img" aria-label="Число услуг по срокам окончания" aria-describedby="forecastDescription" preserveAspectRatio="none">
+                <defs>
+                  <linearGradient id="chartGradient" x1="0" y1="0" x2="0" y2="1">
+                    <stop offset="0%" stop-color="var(--md-chart-fact)" stop-opacity="0.25"/>
+                    <stop offset="100%" stop-color="var(--md-chart-fact)" stop-opacity="0.01"/>
+                  </linearGradient>
+                </defs>
+                <path id="chartArea" d=""></path>
+                <path id="chartFact" fill="none" stroke-width="3" stroke-linecap="round" d=""></path>
+                <path id="chartForecast" fill="none" stroke-width="3" stroke-dasharray="7 7" stroke-linecap="round" d=""></path>
+                <circle id="chartStart" r="4"></circle>
+                <circle id="chartEnd" r="4"></circle>
+              </svg>
               <div class="chart-labels"><span>Сейчас</span><span>7 дн.</span><span>14 дн.</span><span>21 дн.</span><span>30 дн.</span></div></div></div>
             <p id="forecastDescription" class="chart-note">Число услуг, ожидающих оплаты сейчас и приближающихся к окончанию. Это календарный ориентир, не вероятность оттока.</p>
           </article>
@@ -187,6 +199,6 @@
   </dialog>
   <div id="toast" class="toast" role="status" aria-live="polite"><span id="toastMessage"></span><button id="toastClose" class="toast-close" type="button" aria-label="Закрыть сообщение" hidden>×</button></div>
   <div id="liveUpdates" class="sr-only" aria-live="polite" aria-atomic="true"></div>
-  <script src="/static/app.js?v=12" defer></script>
+  <script src="/static/app.js?v=20" defer></script>
 </body>
 </html>

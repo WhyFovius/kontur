@@ -1,10 +1,33 @@
-﻿(() => {
+(() => {
   const form = document.querySelector('#loginForm');
   const button = document.querySelector('#loginButton');
   const error = document.querySelector('#loginError');
   const password = document.querySelector('#password');
   const username = document.querySelector('#username');
   const spinner = document.querySelector('.submit-spinner');
+  const themeToggle = document.querySelector('#themeToggle');
+
+  // Theme Toggle on login page
+  const applyTheme = (theme, persist = true) => {
+    const isDark = theme === 'dark';
+    document.documentElement.dataset.theme = isDark ? 'dark' : 'light';
+    if (themeToggle) {
+      themeToggle.setAttribute('aria-pressed', String(isDark));
+      themeToggle.setAttribute('aria-label', `Переключить на ${isDark ? 'светлую' : 'тёмную'} тему`);
+      themeToggle.title = `Переключить на ${isDark ? 'светлую' : 'тёмную'} тему`;
+    }
+    if (persist) {
+      try { localStorage.setItem('churn-theme', isDark ? 'dark' : 'light'); } catch { /* Ignore storage access errors */ }
+    }
+  };
+
+  if (themeToggle) {
+    applyTheme(document.documentElement.dataset.theme || 'light', false);
+    themeToggle.addEventListener('click', () => {
+      const next = document.documentElement.dataset.theme === 'dark' ? 'light' : 'dark';
+      applyTheme(next, true);
+    });
+  }
 
   const showError = (message, invalidCredentials = false) => {
     error.textContent = message;

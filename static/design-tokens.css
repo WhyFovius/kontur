@@ -1,133 +1,330 @@
-﻿@font-face {
-  font-family: Manrope; font-style: normal; font-weight: 400 800; font-display: swap;
+@font-face {
+  font-family: "Manrope";
+  font-style: normal;
+  font-weight: 400 800;
+  font-display: swap;
   src: url("/static/fonts/Manrope-Cyrillic-ext.woff2") format("woff2");
   unicode-range: U+0460-052F, U+1C80-1C8A, U+20B4, U+2DE0-2DFF, U+A640-A69F, U+FE2E-FE2F;
 }
 @font-face {
-  font-family: Manrope; font-style: normal; font-weight: 400 800; font-display: swap;
+  font-family: "Manrope";
+  font-style: normal;
+  font-weight: 400 800;
+  font-display: swap;
   src: url("/static/fonts/Manrope-Cyrillic.woff2") format("woff2");
   unicode-range: U+0301, U+0400-045F, U+0490-0491, U+04B0-04B1, U+2116;
 }
 @font-face {
-  font-family: Manrope; font-style: normal; font-weight: 400 800; font-display: swap;
+  font-family: "Manrope";
+  font-style: normal;
+  font-weight: 400 800;
+  font-display: swap;
   src: url("/static/fonts/Manrope-Latin-ext.woff2") format("woff2");
   unicode-range: U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C4, U+2113, U+2C60-2C7F, U+A720-A7FF;
 }
 @font-face {
-  font-family: Manrope; font-style: normal; font-weight: 400 800; font-display: swap;
+  font-family: "Manrope";
+  font-style: normal;
+  font-weight: 400 800;
+  font-display: swap;
   src: url("/static/fonts/Manrope-Latin.woff2") format("woff2");
   unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
 }
 
 :root {
   color-scheme: light;
-  --md-primary: #526d64;
-  --md-on-primary: #ffffff;
-  --md-primary-container: #e0eae5;
-  --md-on-primary-container: #263b34;
-  --md-secondary: #696e75;
-  --md-secondary-container: #e7e8e9;
-  --md-on-secondary-container: #30343a;
-  --md-tertiary: #896f59;
-  --md-tertiary-container: #f0e6dc;
-  --md-on-tertiary-container: #45372b;
-  --md-error: #ad5a52;
-  --md-error-container: #f6e7e4;
-  --md-on-error-container: #512824;
-  --md-background: #f5f3ef;
-  --md-on-background: #242b28;
-  --md-surface: #fcfbf8;
-  --md-on-surface: #242b28;
-  --md-on-surface-variant: #5c635f;
-  --md-surface-lowest: #ffffff;
-  --md-surface-low: #f8f7f4;
-  --md-surface-container: #eeece8;
-  --md-surface-high: #e7e4df;
-  --md-surface-highest: #dedbd5;
-  --md-outline: #777e79;
-  --md-outline-variant: #d1d0cb;
-  --md-focus: #526d64;
-  --md-scrim: #1b211e;
-  --md-inverse-surface: #303833;
-  --md-inverse-on-surface: #f1f2ed;
-  --md-risk-high: #b65f55;
-  --md-risk-high-container: #f6e8e4;
-  --md-on-risk-high-container: #5c302b;
-  --md-risk-medium: #94713b;
-  --md-risk-medium-container: #f2ecde;
-  --md-on-risk-medium-container: #493a21;
-  --md-risk-low: #5c7d6c;
-  --md-risk-low-container: #e5ede7;
-  --md-on-risk-low-container: #2c4739;
-  --md-risk-unrated: #747b76;
-  --md-risk-unrated-container: #ebedea;
-  --md-on-risk-unrated-container: #353b37;
-  --md-chart-fact: #667f76;
-  --md-chart-forecast: #b97368;
-  --font-ui: "Manrope", "Segoe UI", sans-serif;
-  --font-display: "Manrope", "Segoe UI", sans-serif;
-  --radius-xs: 9px;
-  --radius-sm: 13px;
-  --radius-md: 18px;
-  --radius-lg: 23px;
-  --radius-xl: 30px;
-  --radius-full: 999px;
-  --shadow-1: 0 1px 2px rgb(36 43 40 / 3%), 0 8px 24px rgb(45 49 45 / 4%);
-  --shadow-2: 0 18px 52px rgb(31 37 34 / 16%);
-  --shadow-3: 0 26px 72px rgb(31 37 34 / 22%);
-  --motion-standard: cubic-bezier(.2, 0, 0, 1);
-  --motion-emphasized: cubic-bezier(.2, .8, .2, 1);
-  --motion-expressive: cubic-bezier(.16, 1, .3, 1);
-  --duration-fast: 160ms;
-  --duration-medium: 280ms;
-  --duration-long: 420ms;
+
+  /* --- Material Design 3 Palette: Light --- */
+  --md-sys-color-primary: #176853;
+  --md-sys-color-on-primary: #ffffff;
+  --md-sys-color-primary-container: #d2f2e6;
+  --md-sys-color-on-primary-container: #002117;
+
+  --md-sys-color-secondary: #4a635b;
+  --md-sys-color-on-secondary: #ffffff;
+  --md-sys-color-secondary-container: #cce8dd;
+  --md-sys-color-on-secondary-container: #062018;
+
+  --md-sys-color-tertiary: #7d5635;
+  --md-sys-color-on-tertiary: #ffffff;
+  --md-sys-color-tertiary-container: #ffddbe;
+  --md-sys-color-on-tertiary-container: #2e1500;
+
+  --md-sys-color-error: #ba1a1a;
+  --md-sys-color-on-error: #ffffff;
+  --md-sys-color-error-container: #ffdad6;
+  --md-sys-color-on-error-container: #410002;
+
+  --md-sys-color-surface: #f7f9f7;
+  --md-sys-color-surface-dim: #d8deda;
+  --md-sys-color-surface-bright: #f7f9f7;
+  --md-sys-color-surface-container-lowest: #ffffff;
+  --md-sys-color-surface-container-low: #f1f5f2;
+  --md-sys-color-surface-container: #ebf0ec;
+  --md-sys-color-surface-container-high: #e5eae6;
+  --md-sys-color-surface-container-highest: #dfe5e1;
+
+  --md-sys-color-on-surface: #171d1a;
+  --md-sys-color-on-surface-variant: #404944;
+  --md-sys-color-outline: #707974;
+  --md-sys-color-outline-variant: #bfc9c3;
+
+  --md-sys-color-inverse-surface: #2c322f;
+  --md-sys-color-inverse-on-surface: #edf2ed;
+  --md-sys-color-inverse-primary: #76d7b9;
+  --md-sys-color-scrim: #000000;
+  --md-sys-color-shadow: #000000;
+
+  /* --- Semantic Risk Tokens: Light (High Contrast, WCAG AA / AAA) --- */
+  --md-risk-high: #94251e;
+  --md-risk-high-container: #fde8e5;
+  --md-on-risk-high-container: #4e110c;
+  --md-risk-high-border: #f5b0a9;
+  --md-risk-high-accent: #c93b32;
+
+  --md-risk-medium: #7a5300;
+  --md-risk-medium-container: #fef3d8;
+  --md-on-risk-medium-container: #422a00;
+  --md-risk-medium-border: #f0d486;
+  --md-risk-medium-accent: #d78e0e;
+
+  --md-risk-low: #156746;
+  --md-risk-low-container: #e0f6ec;
+  --md-on-risk-low-container: #033722;
+  --md-risk-low-border: #91ddb6;
+  --md-risk-low-accent: #229f6d;
+
+  --md-risk-unrated: #4e5b55;
+  --md-risk-unrated-container: #eef2ef;
+  --md-on-risk-unrated-container: #232d28;
+  --md-risk-unrated-border: #c1cbc5;
+  --md-risk-unrated-accent: #727f79;
+
+  /* --- Chart & Visualizations: Light --- */
+  --md-chart-fact: #176853;
+  --md-chart-forecast: #c93b32;
+  --md-chart-area-start: rgba(23, 104, 83, 0.18);
+  --md-chart-area-end: rgba(23, 104, 83, 0.01);
+  --md-chart-grid: rgba(64, 73, 68, 0.12);
+
+  /* --- Backward Compatible Bridge Variables --- */
+  --md-primary: var(--md-sys-color-primary);
+  --md-on-primary: var(--md-sys-color-on-primary);
+  --md-primary-container: var(--md-sys-color-primary-container);
+  --md-on-primary-container: var(--md-sys-color-on-primary-container);
+  --md-secondary: var(--md-sys-color-secondary);
+  --md-secondary-container: var(--md-sys-color-secondary-container);
+  --md-on-secondary-container: var(--md-sys-color-on-secondary-container);
+  --md-tertiary: var(--md-sys-color-tertiary);
+  --md-tertiary-container: var(--md-sys-color-tertiary-container);
+  --md-on-tertiary-container: var(--md-sys-color-on-tertiary-container);
+  --md-error: var(--md-sys-color-error);
+  --md-error-container: var(--md-sys-color-error-container);
+  --md-on-error-container: var(--md-sys-color-on-error-container);
+  --md-background: var(--md-sys-color-surface);
+  --md-on-background: var(--md-sys-color-on-surface);
+  --md-surface: var(--md-sys-color-surface-container-lowest);
+  --md-on-surface: var(--md-sys-color-on-surface);
+  --md-on-surface-variant: var(--md-sys-color-on-surface-variant);
+  --md-surface-lowest: var(--md-sys-color-surface-container-lowest);
+  --md-surface-low: var(--md-sys-color-surface-container-low);
+  --md-surface-container: var(--md-sys-color-surface-container);
+  --md-surface-high: var(--md-sys-color-surface-container-high);
+  --md-surface-highest: var(--md-sys-color-surface-container-highest);
+  --md-outline: var(--md-sys-color-outline);
+  --md-outline-variant: var(--md-sys-color-outline-variant);
+  --md-focus: var(--md-sys-color-primary);
+  --md-scrim: var(--md-sys-color-scrim);
+
+  /* --- Typography --- */
+  --font-ui: "Manrope", system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  --font-display: "Manrope", system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  --font-mono: "Manrope", ui-monospace, "SF Mono", Consolas, monospace;
+
+  /* --- Material Design 3 Shape Tokens --- */
+  --md-shape-none: 0px;
+  --md-shape-extra-small: 4px;
+  --md-shape-small: 8px;
+  --md-shape-medium: 12px;
+  --md-shape-large: 16px;
+  --md-shape-extra-large: 24px;
+  --md-shape-extra-large-top: 24px 24px 0 0;
+  --md-shape-full: 9999px;
+
+  --radius-xs: var(--md-shape-extra-small);
+  --radius-sm: var(--md-shape-small);
+  --radius-md: var(--md-shape-medium);
+  --radius-lg: var(--md-shape-large);
+  --radius-xl: var(--md-shape-extra-large);
+  --radius-full: var(--md-shape-full);
+
+  /* --- Material Design 3 Elevation Shadows: Light --- */
+  --md-elevation-0: none;
+  --md-elevation-1: 0 1px 3px 0 rgba(23, 29, 26, 0.08), 0 1px 2px -1px rgba(23, 29, 26, 0.06);
+  --md-elevation-2: 0 4px 8px 0 rgba(23, 29, 26, 0.08), 0 1px 3px 0 rgba(23, 29, 26, 0.06);
+  --md-elevation-3: 0 8px 18px 0 rgba(23, 29, 26, 0.10), 0 2px 6px 0 rgba(23, 29, 26, 0.06);
+  --md-elevation-4: 0 14px 28px 0 rgba(23, 29, 26, 0.12), 0 4px 10px 0 rgba(23, 29, 26, 0.08);
+  --md-elevation-5: 0 22px 42px 0 rgba(23, 29, 26, 0.16), 0 8px 16px 0 rgba(23, 29, 26, 0.10);
+
+  --shadow-1: var(--md-elevation-1);
+  --shadow-2: var(--md-elevation-3);
+  --shadow-3: var(--md-elevation-5);
+
+  /* --- Material Design 3 Motion Tokens --- */
+  --md-motion-easing-standard: cubic-bezier(0.2, 0.0, 0.0, 1.0);
+  --md-motion-easing-standard-accelerate: cubic-bezier(0.3, 0.0, 1.0, 1.0);
+  --md-motion-easing-standard-decelerate: cubic-bezier(0.0, 0.0, 0.0, 1.0);
+  --md-motion-easing-emphasized: cubic-bezier(0.2, 0.0, 0.0, 1.0);
+  --md-motion-easing-emphasized-accelerate: cubic-bezier(0.3, 0.0, 0.8, 0.15);
+  --md-motion-easing-emphasized-decelerate: cubic-bezier(0.05, 0.7, 0.1, 1.0);
+
+  --md-motion-duration-short1: 50ms;
+  --md-motion-duration-short2: 100ms;
+  --md-motion-duration-short3: 150ms;
+  --md-motion-duration-short4: 200ms;
+  --md-motion-duration-medium1: 250ms;
+  --md-motion-duration-medium2: 300ms;
+  --md-motion-duration-medium3: 350ms;
+  --md-motion-duration-medium4: 400ms;
+  --md-motion-duration-long1: 450ms;
+  --md-motion-duration-long2: 500ms;
+
+  --motion-standard: var(--md-motion-easing-standard);
+  --motion-emphasized: var(--md-motion-easing-emphasized);
+  --motion-expressive: var(--md-motion-easing-emphasized-decelerate);
+  --duration-fast: var(--md-motion-duration-short3);
+  --duration-medium: var(--md-motion-duration-medium2);
+  --duration-long: var(--md-motion-duration-long1);
+
+  /* --- State Layers --- */
+  --md-state-hover: rgba(23, 29, 26, 0.06);
+  --md-state-focus: rgba(23, 29, 26, 0.10);
+  --md-state-pressed: rgba(23, 29, 26, 0.12);
+  --md-state-dragged: rgba(23, 29, 26, 0.16);
 }
+
+/* ==========================================================================
+   Material Design 3 Palette: Dark Mode
+   ========================================================================== */
 :root[data-theme="dark"] {
   color-scheme: dark;
-  --md-primary: #abc2b8;
-  --md-on-primary: #233a32;
-  --md-primary-container: #344d44;
-  --md-on-primary-container: #e2ece6;
-  --md-secondary: #bec2c4;
-  --md-secondary-container: #3b4144;
-  --md-on-secondary-container: #e0e3e4;
-  --md-tertiary: #d1bca7;
-  --md-tertiary-container: #4b3d31;
-  --md-on-tertiary-container: #f0e6dc;
-  --md-error: #e8aaa1;
-  --md-error-container: #5b302b;
-  --md-on-error-container: #f7e1dd;
-  --md-background: #1c211f;
-  --md-on-background: #e5e8e4;
-  --md-surface: #232926;
-  --md-on-surface: #e5e8e4;
-  --md-on-surface-variant: #bec4bf;
-  --md-surface-lowest: #191e1c;
-  --md-surface-low: #272e2b;
-  --md-surface-container: #2c3330;
-  --md-surface-high: #353d39;
-  --md-surface-highest: #404944;
-  --md-outline: #929b95;
-  --md-outline-variant: #49524d;
-  --md-focus: #abc2b8;
-  --md-scrim: #000000;
-  --md-inverse-surface: #e2e6e1;
-  --md-inverse-on-surface: #303733;
-  --md-risk-high: #e7a49a;
-  --md-risk-high-container: #633a34;
-  --md-on-risk-high-container: #f7e0dc;
-  --md-risk-medium: #d5ba86;
-  --md-risk-medium-container: #51442f;
-  --md-on-risk-medium-container: #f0e5ce;
-  --md-risk-low: #a9c4b3;
-  --md-risk-low-container: #344a3c;
-  --md-on-risk-low-container: #e0ece3;
-  --md-risk-unrated: #c0c7c2;
-  --md-risk-unrated-container: #3e4641;
-  --md-on-risk-unrated-container: #e3e7e3;
-  --md-chart-fact: #a9c4b3;
-  --md-chart-forecast: #e7a49a;
-  --shadow-1: 0 1px 2px rgb(0 0 0 / 18%), 0 8px 24px rgb(0 0 0 / 12%);
-  --shadow-2: 0 18px 52px rgb(0 0 0 / 38%);
-  --shadow-3: 0 26px 72px rgb(0 0 0 / 50%);
+
+  --md-sys-color-primary: #76d7b9;
+  --md-sys-color-on-primary: #00382a;
+  --md-sys-color-primary-container: #00513d;
+  --md-sys-color-on-primary-container: #93f4d5;
+
+  --md-sys-color-secondary: #b1ccbf;
+  --md-sys-color-on-secondary: #1d352d;
+  --md-sys-color-secondary-container: #334b43;
+  --md-sys-color-on-secondary-container: #cce8db;
+
+  --md-sys-color-tertiary: #f0be94;
+  --md-sys-color-on-tertiary: #49280b;
+  --md-sys-color-tertiary-container: #633e1f;
+  --md-sys-color-on-tertiary-container: #ffddbe;
+
+  --md-sys-color-error: #ffb4ab;
+  --md-sys-color-on-error: #690005;
+  --md-sys-color-error-container: #93000a;
+  --md-sys-color-on-error-container: #ffdad6;
+
+  --md-sys-color-surface: #0f1513;
+  --md-sys-color-surface-dim: #0f1513;
+  --md-sys-color-surface-bright: #363b39;
+  --md-sys-color-surface-container-lowest: #0a0f0e;
+  --md-sys-color-surface-container-low: #171d1b;
+  --md-sys-color-surface-container: #1b211f;
+  --md-sys-color-surface-container-high: #262c29;
+  --md-sys-color-surface-container-highest: #313734;
+
+  --md-sys-color-on-surface: #e0e5e1;
+  --md-sys-color-on-surface-variant: #bfc9c3;
+  --md-sys-color-outline: #89938d;
+  --md-sys-color-outline-variant: #404944;
+
+  --md-sys-color-inverse-surface: #e0e5e1;
+  --md-sys-color-inverse-on-surface: #2d322f;
+  --md-sys-color-inverse-primary: #176853;
+  --md-sys-color-scrim: #000000;
+  --md-sys-color-shadow: #000000;
+
+  /* --- Semantic Risk Tokens: Dark --- */
+  --md-risk-high: #ffb4ab;
+  --md-risk-high-container: #471410;
+  --md-on-risk-high-container: #ffdad6;
+  --md-risk-high-border: #8d211a;
+  --md-risk-high-accent: #ff897d;
+
+  --md-risk-medium: #fedc94;
+  --md-risk-medium-container: #3f2900;
+  --md-on-risk-medium-container: #ffe0a3;
+  --md-risk-medium-border: #7c5200;
+  --md-risk-medium-accent: #f5b536;
+
+  --md-risk-low: #82d9aa;
+  --md-risk-low-container: #003823;
+  --md-on-risk-low-container: #c4f3d9;
+  --md-risk-low-border: #146946;
+  --md-risk-low-accent: #43bf85;
+
+  --md-risk-unrated: #b8c4be;
+  --md-risk-unrated-container: #242c28;
+  --md-on-risk-unrated-container: #e0e7e3;
+  --md-risk-unrated-border: #49534e;
+  --md-risk-unrated-accent: #8c9892;
+
+  /* --- Chart & Visualizations: Dark --- */
+  --md-chart-fact: #76d7b9;
+  --md-chart-forecast: #ff897d;
+  --md-chart-area-start: rgba(118, 215, 185, 0.22);
+  --md-chart-area-end: rgba(118, 215, 185, 0.01);
+  --md-chart-grid: rgba(191, 201, 195, 0.10);
+
+  /* --- Backward Compatible Bridge Variables: Dark --- */
+  --md-primary: var(--md-sys-color-primary);
+  --md-on-primary: var(--md-sys-color-on-primary);
+  --md-primary-container: var(--md-sys-color-primary-container);
+  --md-on-primary-container: var(--md-sys-color-on-primary-container);
+  --md-secondary: var(--md-sys-color-secondary);
+  --md-secondary-container: var(--md-sys-color-secondary-container);
+  --md-on-secondary-container: var(--md-sys-color-on-secondary-container);
+  --md-tertiary: var(--md-sys-color-tertiary);
+  --md-tertiary-container: var(--md-sys-color-tertiary-container);
+  --md-on-tertiary-container: var(--md-sys-color-on-tertiary-container);
+  --md-error: var(--md-sys-color-error);
+  --md-error-container: var(--md-sys-color-error-container);
+  --md-on-error-container: var(--md-sys-color-on-error-container);
+  --md-background: var(--md-sys-color-surface);
+  --md-on-background: var(--md-sys-color-on-surface);
+  --md-surface: var(--md-sys-color-surface-container-low);
+  --md-on-surface: var(--md-sys-color-on-surface);
+  --md-on-surface-variant: var(--md-sys-color-on-surface-variant);
+  --md-surface-lowest: var(--md-sys-color-surface-container-lowest);
+  --md-surface-low: var(--md-sys-color-surface-container-low);
+  --md-surface-container: var(--md-sys-color-surface-container);
+  --md-surface-high: var(--md-sys-color-surface-container-high);
+  --md-surface-highest: var(--md-sys-color-surface-container-highest);
+  --md-outline: var(--md-sys-color-outline);
+  --md-outline-variant: var(--md-sys-color-outline-variant);
+  --md-focus: var(--md-sys-color-primary);
+  --md-scrim: var(--md-sys-color-scrim);
+
+  /* --- Material Design 3 Elevation Shadows: Dark --- */
+  --md-elevation-0: none;
+  --md-elevation-1: 0 1px 3px 0 rgba(0, 0, 0, 0.40), 0 1px 2px -1px rgba(0, 0, 0, 0.30);
+  --md-elevation-2: 0 4px 8px 0 rgba(0, 0, 0, 0.45), 0 1px 3px 0 rgba(0, 0, 0, 0.35);
+  --md-elevation-3: 0 8px 18px 0 rgba(0, 0, 0, 0.50), 0 2px 6px 0 rgba(0, 0, 0, 0.40);
+  --md-elevation-4: 0 14px 28px 0 rgba(0, 0, 0, 0.55), 0 4px 10px 0 rgba(0, 0, 0, 0.45);
+  --md-elevation-5: 0 22px 42px 0 rgba(0, 0, 0, 0.65), 0 8px 16px 0 rgba(0, 0, 0, 0.50);
+
+  --shadow-1: var(--md-elevation-1);
+  --shadow-2: var(--md-elevation-3);
+  --shadow-3: var(--md-elevation-5);
+
+  /* --- State Layers: Dark --- */
+  --md-state-hover: rgba(255, 255, 255, 0.08);
+  --md-state-focus: rgba(255, 255, 255, 0.12);
+  --md-state-pressed: rgba(255, 255, 255, 0.14);
+  --md-state-dragged: rgba(255, 255, 255, 0.18);
 }
