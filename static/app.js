@@ -105,7 +105,9 @@
     const total = levels.reduce((sum, value) => sum + value, 0);
     setAnimatedText('#donutTotal', integer(total));
     ['#legendHigh', '#legendMedium', '#legendLow', '#legendUnrated'].forEach((selector, index) => { $(selector).textContent = integer(levels[index]); });
-    const colors = ['#a84435', '#b98534', '#4e8a67', '#9ba69d'];
+    const styles = getComputedStyle(document.documentElement);
+    const colors = ['--md-risk-high', '--md-risk-medium', '--md-risk-low', '--md-risk-unrated']
+      .map(token => styles.getPropertyValue(token).trim());
     let angle = 0;
     const segments = levels.map((value, index) => {
       const start = angle;
@@ -132,13 +134,14 @@
     $('#chartStart').setAttribute('cy', String(y(current)));
     $('#chartEnd').setAttribute('cx', String(x(4)));
     $('#chartEnd').setAttribute('cy', String(y(counts[4] || 0)));
-    $('#trendChart').setAttribute('aria-label', `Сейчас ${integer(current)} сигналов; к концу 30 дней прогнозируется ${integer(counts[4] || 0)}.`);
+    $('#trendChart').setAttribute('aria-label', `Сейчас ${integer(current)} услуг на продлении; к сроку 30 дней ожидается ${integer(counts[4] || 0)} услуг.`);
   }
 
   function renderSummary(data) {
     const previous = state.summary;
     setAnimatedText('#metricCustomers', integer(data.customerCount));
     setAnimatedText('#metricRated', integer(data.ratedCount));
+    setAnimatedText('#metricRatedPercent', `${data.customerCount ? Math.round((data.ratedCount / data.customerCount) * 100) : 0}%`);
     setAnimatedText('#metricHigh', integer(data.highRisk));
     setAnimatedText('#metricLoss', money(data.estimatedLoss));
     setAnimatedText('#lossHero', money(data.estimatedLoss));
@@ -200,12 +203,16 @@
       const safeKey = escapeHTML(key);
       return `<div class="weight-item">
         <div class="weight-track">
-          <div class="weight-label"><span id="weight-label-${safeKey}">${escapeHTML(label)}</span><span class="weight-live-value">${integer(value)}</span></div>
+          <div class="weight-label"><label for="weight-${safeKey}" id="weight-label-${safeKey}">${escapeHTML(label)}</label><span class="weight-live-value">${integer(value)}</span></div>
           <input class="weight-slider" id="weight-${safeKey}" type="range" min="0" max="100" step="1" value="${value}" data-weight="${safeKey}" aria-labelledby="weight-label-${safeKey}" aria-valuetext="${value} из 100">
         </div>
         <input class="weight-number" type="number" min="0" max="100" step="1" value="${value}" data-weight="${safeKey}" aria-label="Вес признака ${escapeHTML(label)}" inputmode="numeric">
       </div>`;
     }).join('');
+    const thresholds = settings.thresholds || {};
+    const medium = Number(thresholds.medium ?? 35);
+    const high = Number(thresholds.high ?? 65);
+    $('.threshold-note').innerHTML = `<b>Низкий</b> 0–${medium - 1} <i></i><b>Средний</b> ${medium}–${high - 1} <i></i><b>Высокий</b> ${high}–100`;
   }
 
   function scheduleWeightSave(key, value) {
@@ -258,16 +265,24 @@
       ['Выручка в месяц', money(customer.monthlyRevenue)],
     ];
     const statMarkup = statistics.map(([label, value]) => `<div class="detail-stat"><span>${escapeHTML(label)}</span><strong>${escapeHTML(value)}</strong></div>`).join('');
-    const reasons = (customer.reasons || []).map(reason => `<div class="reason-item">${escapeHTML(reason)}</div>`).join('');
+    const reasons = (customer.reasons || []).map(reason => `<div class="reason-item">${escapeHTML(reason)}</div>`).join('') || '<p class="empty-detail">Срабатываний нет или данных недостаточно.</p>';
     const services = customer.services?.length ? customer.services.map(service => {
       const status = serviceStatusLabels[service.status] || service.status;
       const term = paymentLabels[service.paymentTerm] || service.paymentTerm || '—';
       const expiry = service.expiresAt ? new Date(service.expiresAt).toLocaleDateString('ru-RU') : '';
       return `<div class="service-row"><span>${escapeHTML(service.name || 'Услуга')} · ${money(service.price)}</span><span>${escapeHTML(status)} · ${escapeHTML(term)}${expiry ? ` · до ${escapeHTML(expiry)}` : ''}</span></div>`;
     }).join('') : '<p class="empty-detail">Услуги не загружены.</p>';
-    $('#customerDetail').innerHTML = `<div class="detail-stats">${statMarkup}</div>
+    const score = customer.score == null ? 0 : Math.max(0, Math.min(100, Number(customer.score)));
+    const paymentsNote = customer.features?.failed_transactions
+      ? '<p class="detail-data-note">В снимке есть сигнал о незавершённых платежах. Список отдельных транзакций API не предоставляет.</p>'
+      : '<p class="detail-data-note">Отдельные транзакции не входят в данные карточки; показаны доступные суммы пополнений и услуг.</p>';
+    $('#customerDetail').innerHTML = `<section class="detail-score ${level}" aria-label="Оценка риска ${customer.score == null ? 'недоступна' : `${score} из 100`}">
+        <div class="detail-score-copy"><span>ОЦЕНКА РИСКА</span><strong>${customer.score == null ? '—' : `${score}<small> / 100</small>`}</strong></div>
+        <span class="risk-pill ${level}">${riskLabels[level]}</span>
+        <progress class="detail-score-track" max="100" value="${score}" aria-label="Шкала риска: ${customer.score == null ? 'нет оценки' : `${score} из 100`}"></progress>
+      </section><div class="detail-stats">${statMarkup}</div>
       <section class="detail-section"><h3>Что повлияло на оценку</h3><div class="reason-list">${reasons}</div></section>
-      <section class="detail-section"><h3>Услуги клиента</h3>${services}</section>
+      <section class="detail-section"><h3>Услуги клиента</h3>${services}</section>${paymentsNote}
       <p class="empty-detail">Потери — оценка выручки активных услуг за три месяца после вычета доступного баланса, умноженная на долю риска. Это сценарная оценка для приоритизации контакта.</p>`;
   }
 
@@ -303,12 +318,28 @@
       renderCustomers(customerData);
       if (settings) renderWeights(settings);
       $('#lastUpdated').textContent = `Обновлено ${new Date().toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' })}`;
+      $('#connectionStatus').classList.remove('is-error');
+      $('#connectionLabel').textContent = 'Синхронизация активна';
+      $('#snapshotFreshness').textContent = 'Снимок синхронизирован';
+      $('#snapshotSyncHint').textContent = 'Проверка каждые 10 сек.';
+      document.body.classList.add('dashboard-ready');
       $('#tableFooter').textContent = `Оценка по текущему снимку · горизонт потерь — три месяца`;
     })();
     try {
       await state.refreshPromise;
     } finally {
       state.refreshPromise = null;
+    }
+  }
+
+  function markConnectionError(error) {
+    const status = $('#connectionStatus');
+    status.classList.add('is-error');
+    $('#connectionLabel').textContent = 'Нет связи с сервером';
+    $('#snapshotFreshness').textContent = 'Сервер недоступен';
+    $('#snapshotSyncHint').textContent = state.summary ? 'Показаны последние загруженные данные.' : 'Повторите загрузку, когда связь восстановится.';
+    if (!state.summary) {
+      $('#customerRows').innerHTML = `<tr><td colspan="7"><div class="table-state"><strong>Не удалось загрузить данные</strong><span>${escapeHTML(error.message)}</span><button class="table-retry" type="button" data-retry>Повторить</button></div></td></tr>`;
     }
   }
 
@@ -388,6 +419,10 @@
       refresh().catch(error => showToast(`Не удалось открыть страницу клиентов: ${error.message}`, { persistent: true }));
     });
     $('#customerRows').addEventListener('click', event => {
+      if (event.target.closest('[data-retry]')) {
+        refresh(true).catch(error => { markConnectionError(error); showToast(`Не удалось загрузить данные: ${error.message}`, { persistent: true }); });
+        return;
+      }
       const button = event.target.closest('[data-customer]');
       if (button) openCustomer(button.dataset.customer);
     });
@@ -408,7 +443,7 @@
       const file = event.target.files?.[0];
       if (file) uploadSnapshot(file);
     });
-    $('#logoutButton').addEventListener('click', async () => {
+    const logout = async () => {
       try {
         await api('/api/v1/auth/logout', { method: 'POST' });
       } catch (error) {
@@ -416,7 +451,9 @@
       } finally {
         location.replace('/login');
       }
-    });
+    };
+    $('#logoutButton').addEventListener('click', logout);
+    $('#logoutButtonMobile').addEventListener('click', logout);
     $('.close-dialog').addEventListener('click', () => $('#customerDialog').close());
     $('#customerDialog').addEventListener('click', event => {
       if (event.target === event.currentTarget) event.currentTarget.close();
@@ -443,12 +480,13 @@
       await refresh(true);
       window.setInterval(() => {
         if (document.visibilityState === 'visible' && !state.refreshPromise) {
-          refresh().catch(error => showToast(`Не удалось обновить данные: ${error.message}`, { persistent: true }));
+          refresh().catch(error => { markConnectionError(error); showToast(`Не удалось обновить данные: ${error.message}`, { persistent: true }); });
         }
       }, 10000);
     } catch (error) {
       if (error.status !== 401) {
         console.error(error);
+        markConnectionError(error);
         showToast(`Не удалось загрузить рабочее пространство: ${error.message}`, { persistent: true });
       }
     }

@@ -1,0 +1,56 @@
+@font-face {
+  font-family: Onest; font-style: normal; font-weight: 400 700; font-display: swap;
+  src: url("/static/fonts/Onest-Cyrillic-ext.woff2") format("woff2");
+  unicode-range: U+0460-052F, U+1C80-1C8A, U+20B4, U+2DE0-2DFF, U+A640-A69F, U+FE2E-FE2F;
+}
+@font-face {
+  font-family: Onest; font-style: normal; font-weight: 400 700; font-display: swap;
+  src: url("/static/fonts/Onest-Cyrillic.woff2") format("woff2");
+  unicode-range: U+0301, U+0400-045F, U+0490-0491, U+04B0-04B1, U+2116;
+}
+@font-face {
+  font-family: Onest; font-style: normal; font-weight: 400 700; font-display: swap;
+  src: url("/static/fonts/Onest-Latin-ext.woff2") format("woff2");
+  unicode-range: U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C4, U+2113, U+2C60-2C7F, U+A720-A7FF;
+}
+@font-face {
+  font-family: Onest; font-style: normal; font-weight: 400 700; font-display: swap;
+  src: url("/static/fonts/Onest-Latin.woff2") format("woff2");
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+
+:root {
+  --md-primary: #28634f; --md-on-primary: #ffffff; --md-primary-container: #d7eee4; --md-on-primary-container: #153b2f;
+  --md-secondary: #586357; --md-secondary-container: #e0e8dc; --md-on-secondary-container: #253128;
+  --md-tertiary: #86621e; --md-tertiary-container: #f4e5bf; --md-on-tertiary-container: #392a0d;
+  --md-error: #b3261e; --md-error-container: #f9dedc; --md-on-error-container: #410e0b;
+  --md-background: #f5f6f0; --md-on-background: #17201b; --md-surface: #fbfcf8; --md-on-surface: #17201b;
+  --md-on-surface-variant: #4f5c53; --md-surface-lowest: #ffffff; --md-surface-low: #f2f4ed; --md-surface-container: #ecefe7;
+  --md-surface-high: #e5e9e0; --md-surface-highest: #dfe4da; --md-outline: #6e786f; --md-outline-variant: #c3cbc1;
+  --md-focus: #1c654e; --md-scrim: #111a15; --md-inverse-surface: #2c342e; --md-inverse-on-surface: #eef2ea;
+  --md-risk-high: #a83e32; --md-risk-high-container: #f6e4df; --md-on-risk-high-container: #51231d;
+  --md-risk-medium: #835b13; --md-risk-medium-container: #f3e9d2; --md-on-risk-medium-container: #392808;
+  --md-risk-low: #286b4c; --md-risk-low-container: #e0eee5; --md-on-risk-low-container: #173d2b;
+  --md-risk-unrated: #58645b; --md-risk-unrated-container: #e8ece6; --md-on-risk-unrated-container: #252e28;
+  --md-chart-fact: #28634f; --md-chart-forecast: #a83e32;
+  --font-ui: "Onest", "Segoe UI", sans-serif; --font-display: "Literata", Georgia, "Times New Roman", serif;
+  --radius-xs: 8px; --radius-sm: 12px; --radius-md: 16px; --radius-lg: 22px; --radius-xl: 28px; --radius-full: 999px;
+  --shadow-1: 0 1px 2px rgb(26 39 31 / 5%), 0 5px 18px rgb(26 39 31 / 3%); --shadow-2: 0 12px 36px rgb(16 30 22 / 14%);
+  --motion-standard: cubic-bezier(0.2, 0, 0, 1);
+}
+:root[data-theme="dark"] {
+  --md-primary: #a2d7bf; --md-on-primary: #103a2d; --md-primary-container: #214d3d; --md-on-primary-container: #d7eee4;
+  --md-secondary: #c2cdbf; --md-secondary-container: #3b463b; --md-on-secondary-container: #e0e8dc;
+  --md-tertiary: #dfc27f; --md-tertiary-container: #554318; --md-on-tertiary-container: #f4e5bf;
+  --md-error: #ffb4a9; --md-error-container: #93000a; --md-on-error-container: #ffdad6;
+  --md-background: #111a15; --md-on-background: #e1e7df; --md-surface: #17221c; --md-on-surface: #e1e7df;
+  --md-on-surface-variant: #c0c9bf; --md-surface-lowest: #101813; --md-surface-low: #1a261f; --md-surface-container: #202c24;
+  --md-surface-high: #29362e; --md-surface-highest: #344138; --md-outline: #89958b; --md-outline-variant: #414d43;
+  --md-focus: #a2d7bf; --md-scrim: #000000; --md-inverse-surface: #e1e7df; --md-inverse-on-surface: #2c342e;
+  --md-risk-high: #ffb4a9; --md-risk-high-container: #642b23; --md-on-risk-high-container: #ffdad3;
+  --md-risk-medium: #e5c17b; --md-risk-medium-container: #514119; --md-on-risk-medium-container: #f4e5bf;
+  --md-risk-low: #9ad2aa; --md-risk-low-container: #204632; --md-on-risk-low-container: #d5f2dc;
+  --md-risk-unrated: #bbc5bb; --md-risk-unrated-container: #39443b; --md-on-risk-unrated-container: #e2e8df;
+  --md-chart-fact: #a2d7bf; --md-chart-forecast: #ffb4a9;
+  --shadow-1: 0 1px 2px rgb(0 0 0 / 18%), 0 5px 20px rgb(0 0 0 / 12%); --shadow-2: 0 16px 46px rgb(0 0 0 / 42%);
+}
