@@ -169,6 +169,7 @@ export function RiskStream({
     }
 
     let raf = 0;
+    let lastDraw = 0;
     let running = false;
     let visible = !document.hidden;
     let inView = true;
@@ -176,6 +177,14 @@ export function RiskStream({
 
     const loop = (now: number) => {
       if (!running) return;
+      // Path repaints are the one non-compositor cost here: on 240-360 Hz
+      // panels, drawing every rAF quadruples paint work for no visible
+      // gain, so draws are capped at ~120/s (60 Hz displays unaffected).
+      if (now - lastDraw < 8) {
+        raf = requestAnimationFrame(loop);
+        return;
+      }
+      lastDraw = now;
       const elapsed = now - started;
       const reveal = 1 - Math.pow(1 - Math.min(1, elapsed / REVEAL_MS), 3);
       draw((elapsed / FLOW_PERIOD_MS) * Math.PI * 2, reveal);

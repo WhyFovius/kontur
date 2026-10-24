@@ -820,7 +820,7 @@ a { color: var(--md-primary); }
 .drag-select-touch-x { touch-action: pan-y; }
 .drag-thumb {
   position: absolute; left: 0; top: 0;
-  pointer-events: none; will-change: transform, width, height;
+  pointer-events: none;
 }
 .drag-select[data-dragging="true"] .drag-thumb {
   box-shadow: inset 0 0 0 1.5px color-mix(in srgb, var(--md-primary) 45%, transparent), var(--elevation-2);
@@ -1455,7 +1455,6 @@ h1, h2, h3,
   background: var(--brand-black);
   box-shadow: var(--elevation-1);
   transition: box-shadow var(--dur-short-4) var(--motion-standard);
-  will-change: transform;
 }
 .workspace-nav[data-dragging] .nav-pill { box-shadow: var(--elevation-2); }
 .nav-item.is-active { color: #ffffff; }
@@ -1466,7 +1465,6 @@ h1, h2, h3,
   background: var(--md-surface-lowest); color: var(--md-primary);
   --icon-cutout: var(--md-surface-lowest);
   transition: border-radius .35s var(--motion-shape), background-color .2s, color .2s, border-color .2s;
-  will-change: transform;
 }
 .nav-item.is-active .nav-icon {
   border-radius: var(--shape-cookie);
@@ -1679,7 +1677,9 @@ md-outlined-button:active, md-text-button:active { transform: scale(.97); }
   position: relative; z-index: 1; overflow: hidden; isolation: isolate;
   display: grid; place-items: end center;
   border: 1px solid color-mix(in srgb, var(--brand-sky) 34%, transparent);
-  border-radius: var(--shape-arch);
+  /* Cookie blob portrait frame (M3 Expressive reference), not an arch. */
+  border-radius: var(--shape-cookie-portrait);
+  transition: border-radius .6s var(--motion-shape);
   background:
     radial-gradient(160px 120px at 50% 0%, color-mix(in srgb, var(--brand-sky) 30%, transparent), transparent 65%),
     linear-gradient(168deg, #0a2138 0%, #000000 88%);
@@ -1760,7 +1760,6 @@ md-outlined-button:active, md-text-button:active { transform: scale(.97); }
   border-radius: var(--shape-button);
   background: #000000; box-shadow: var(--elevation-1);
   transition: border-radius .3s var(--motion-shape);
-  will-change: transform;
 }
 .segmented[data-dragging] .segmented-thumb { box-shadow: var(--elevation-2); }
 .segmented-item.is-selected { color: #ffffff; }
@@ -1959,7 +1958,7 @@ md-filled-button.upload-button { flex: 0 0 auto; max-width: 100%; }
 }
 .theme-toggle-icon-layer {
   position: absolute; inset: 0; display: grid; place-items: center;
-  pointer-events: none; will-change: transform, opacity;
+  pointer-events: none;
 }
 .theme-toggle-icon-layer svg { width: 22px; height: 22px; display: block; }
 ::view-transition-old(root), ::view-transition-new(root) {
@@ -2024,7 +2023,6 @@ md-filled-button.upload-button { flex: 0 0 auto; max-width: 100%; }
   mask-repeat: repeat-x;
   -webkit-mask-position: 0 50%;
   mask-position: 0 50%;
-  will-change: clip-path;
 }
 :root[data-theme="dark"] .expressive-slider-track-active {
   background: linear-gradient(90deg, var(--md-primary-container) 0%, var(--md-primary) 58%, var(--brand-sky) 100%);
@@ -2041,7 +2039,7 @@ md-filled-button.upload-button { flex: 0 0 auto; max-width: 100%; }
 .expressive-slider-stops i.is-reached { background: rgba(255, 255, 255, .88); }
 .expressive-slider-flight {
   position: absolute; left: 0; top: 0; width: 100%; height: 100%;
-  display: block; pointer-events: none; will-change: transform;
+  display: block; pointer-events: none;
 }
 .expressive-slider-value {
   position: absolute; left: 0; top: 1px;
@@ -2063,9 +2061,12 @@ md-filled-button.upload-button { flex: 0 0 auto; max-width: 100%; }
   width: 28px; height: 28px;
   display: flex; align-items: center; justify-content: center; gap: 3px;
   border: 1px solid color-mix(in srgb, var(--brand-sky) 48%, transparent);
-  border-radius: var(--shape-keycap);
+  /* Idle handle is a true circle (M3): the keycap squircle read as a
+     "square" once focus left the control. The thin surface ring keeps
+     the sky handle visually separated from the sky wavy track. */
+  border-radius: 50%;
   background: var(--brand-sky); color: #001a26;
-  box-shadow: var(--elevation-1);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--md-surface-lowest) 88%, transparent), var(--elevation-1);
   transform: translate(-50%, -50%) scale(1);
   transition: width .28s var(--motion-shape), height .28s var(--motion-shape), border-radius .28s var(--motion-shape), background-color .2s var(--motion-standard), color .2s var(--motion-standard), box-shadow .2s var(--motion-standard), transform .18s var(--motion-standard);
 }
@@ -2075,23 +2076,23 @@ md-filled-button.upload-button { flex: 0 0 auto; max-width: 100%; }
 }
 .expressive-slider:hover .expressive-slider-handle { transform: translate(-50%, -50%) scale(1.08); }
 .expressive-slider[data-dragging] .expressive-slider-handle,
-.expressive-slider[data-focused] .expressive-slider-handle {
+.expressive-slider:has(> .expressive-slider-input:focus-visible) .expressive-slider-handle {
   width: 18px; height: 42px; flex-direction: column;
   border-radius: var(--shape-full);
   background: #000000; color: var(--brand-sky);
   box-shadow: var(--elevation-2);
 }
 .expressive-slider[data-dragging] .expressive-slider-value,
-.expressive-slider[data-focused] .expressive-slider-value {
+.expressive-slider:has(> .expressive-slider-input:focus-visible) .expressive-slider-value {
   border-radius: var(--shape-full);
   background: var(--brand-sky); color: #001a26;
 }
 .expressive-slider[data-dragging][data-value-edge="center"] .expressive-slider-value,
-.expressive-slider[data-focused][data-value-edge="center"] .expressive-slider-value { transform: translateX(-50%) scale(1.08); }
+.expressive-slider:has(> .expressive-slider-input:focus-visible)[data-value-edge="center"] .expressive-slider-value { transform: translateX(-50%) scale(1.08); }
 .expressive-slider[data-dragging][data-value-edge="start"] .expressive-slider-value,
-.expressive-slider[data-focused][data-value-edge="start"] .expressive-slider-value { transform: translateX(-14%) scale(1.08); }
+.expressive-slider:has(> .expressive-slider-input:focus-visible)[data-value-edge="start"] .expressive-slider-value { transform: translateX(-14%) scale(1.08); }
 .expressive-slider[data-dragging][data-value-edge="end"] .expressive-slider-value,
-.expressive-slider[data-focused][data-value-edge="end"] .expressive-slider-value { transform: translateX(-86%) scale(1.08); }
+.expressive-slider:has(> .expressive-slider-input:focus-visible)[data-value-edge="end"] .expressive-slider-value { transform: translateX(-86%) scale(1.08); }
 .expressive-slider:has(> .expressive-slider-input:focus-visible) .expressive-slider-handle {
   box-shadow: 0 0 0 3px var(--md-surface-lowest), 0 0 0 6px var(--focus-ring), var(--elevation-1);
 }
@@ -2200,3 +2201,53 @@ md-filled-button.upload-button { flex: 0 0 auto; max-width: 100%; }
 .segmented[data-dragging] .segmented-thumb { border-radius: var(--shape-button-pressed); }
 .weight-item, .weight-head, .calc-row-head { min-width: 0; }
 .weight-head label, .calc-row-head label { overflow-wrap: anywhere; }
+
+
+/* ==========================================================================
+   Feedback round 3: restored state morphs + smoothness/optimization pass
+   - drag-select thumbs and icon tiles morph shape between states again
+     (M3 Expressive), with spring-follow transforms doing the travel;
+   - layer promotion (will-change) is now scoped to active drags and
+     continuous loops only — idle surfaces no longer hold layers open.
+   ========================================================================== */
+
+/* Upload button: the slotted glyph had no CSS size at all and vanished;
+   line-height:1 keeps icon + label optically centred in the 42px pill. */
+.upload-label-stack { line-height: 1; }
+.upload-label-sizer svg, .upload-label-layer svg {
+  width: 18px; height: 18px; flex: none; display: block;
+}
+.upload-label-layer { line-height: 1; }
+
+/* State morphs for every drag-select thumb (nav, mobile nav, segmented,
+   donut legend): fan-asymmetric while held, standard shape at rest. */
+.drag-thumb {
+  transition: border-radius .35s var(--motion-shape), box-shadow .25s var(--motion-standard);
+}
+.drag-select[data-dragging] .drag-thumb {
+  border-radius: 24px 14px 24px 14px;
+  will-change: transform;
+}
+.workspace-nav[data-dragging] .nav-pill { border-radius: 26px 16px 26px 16px; }
+.segmented[data-dragging] .segmented-thumb { border-radius: 24px 14px 24px 14px; }
+
+/* Icon tiles and segmented content animate between states, not just the
+   thumb travelling underneath them. */
+.nav-item:not(.is-active):hover .nav-icon { border-radius: var(--shape-clover); }
+.mobile-nav-icon-wrap {
+  transition: border-radius .35s var(--motion-shape), background-color .2s var(--motion-standard), color .2s var(--motion-standard);
+}
+.segmented-label { transition: transform .25s var(--motion-standard); }
+.segmented-item.is-selected .segmented-label { transform: scale(1.04); }
+.risk-dot {
+  transition: transform .25s var(--motion-standard), border-radius .3s var(--motion-shape);
+}
+.segmented-item.is-selected .risk-dot { transform: scale(1.25); }
+
+/* Mascot portrait frame morphs cookie <-> cookie-alt on stage hover. */
+.mascot-stage:hover .mascot-stage-figure { border-radius: var(--shape-cookie-portrait-alt); }
+
+@media (prefers-reduced-motion: reduce) {
+  .drag-thumb, .segmented-label, .risk-dot, .mascot-stage-figure,
+  .mobile-nav-icon-wrap { transition: none; }
+}
