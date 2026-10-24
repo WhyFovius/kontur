@@ -497,6 +497,31 @@ def init_db() -> None:
         CREATE TABLE IF NOT EXISTS metadata (key TEXT PRIMARY KEY, value TEXT NOT NULL);
         CREATE TABLE IF NOT EXISTS login_attempts (key TEXT PRIMARY KEY, window_started REAL NOT NULL, attempts INTEGER NOT NULL);
         CREATE TABLE IF NOT EXISTS oidc_states (state_hash TEXT PRIMARY KEY, nonce TEXT NOT NULL, code_verifier TEXT NOT NULL, expires_at TEXT NOT NULL);
+        CREATE TABLE IF NOT EXISTS risk_events (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            episode_key TEXT NOT NULL,
+            customer_id TEXT,
+            event_type TEXT NOT NULL,
+            severity TEXT NOT NULL,
+            title TEXT NOT NULL,
+            message TEXT NOT NULL,
+            score INTEGER,
+            estimated_loss INTEGER NOT NULL DEFAULT 0,
+            payload TEXT NOT NULL DEFAULT '{}',
+            first_seen_at TEXT NOT NULL,
+            last_seen_at TEXT NOT NULL,
+            read_at TEXT,
+            resolved_at TEXT
+        );
+        CREATE UNIQUE INDEX IF NOT EXISTS risk_events_active_episode_idx
+            ON risk_events(episode_key) WHERE resolved_at IS NULL;
+        CREATE INDEX IF NOT EXISTS risk_events_first_seen_idx
+            ON risk_events(first_seen_at DESC, id DESC);
+        CREATE TABLE IF NOT EXISTS risk_monitor_state (
+            id INTEGER PRIMARY KEY CHECK (id = 1),
+            state TEXT NOT NULL,
+            updated_at TEXT NOT NULL
+        );
         CREATE INDEX IF NOT EXISTS services_account_id_idx ON services(account_id);
         CREATE INDEX IF NOT EXISTS transactions_account_id_idx ON transactions(account_id);
         """)

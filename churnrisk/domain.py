@@ -491,3 +491,376 @@ def churn_timeline(
             "коэффициентами риска 0,80 / 0,45 / 0,15."
         ),
     }
+
+
+# ---------------------------------------------------------------------------
+# Realtime risk radar: alert candidates + rescue prioritisation
+# ---------------------------------------------------------------------------
+
+CRITICAL_SCORE_THRESHOLD = 80
+LARGE_LOSS_THRESHOLD_CENTS = 50_000
+_ALERT_SEVERITY_ORDER = {"critical": 0, "warning": 1, "info": 2}
+
+
+def _service_days(service: dict[str, Any], now: datetime) -> float | None:
+    expires = parse_date(service.get("expiresAt"))
+    if expires is None:
+        return None
+    return (expires - now).total_seconds() / 86400
+
+
+def _due_services(customer: dict[str, Any], now: datetime) -> list[dict[str, Any]]:
+    return [
+        service
+        for service in customer.get("services", [])
+        if _due_soon(service, now)
+    ]
+
+
+def _shortage(customer: dict[str, Any], now: datetime) -> int:
+    due_amount = sum(
+        _number(service.get("price")) for service in _due_services(customer, now)
+    )
+    available = _number(customer.get("availableBalance", customer.get("balance")))
+    return round(max(0.0, due_amount - available))
+
+
+def _nearest_deadline(
+    customer: dict[str, Any], now: datetime
+) -> tuple[datetime | None, float | None, dict[str, Any] | None]:
+    candidates: list[tuple[datetime, dict[str, Any]]] = []
+    for service in customer.get("services", []):
+        status = str(service.get("status", "")).lower()
+        if status == "prolong_wait":
+            candidates.append((parse_date(service.get("expiresAt")) or now, service))
+        elif _is_billable(service):
+            expires = parse_date(service.get("expiresAt"))
+            if expires is not None:
+                candidates.append((expires, service))
+    if not candidates:
+        return None, None, None
+    deadline, service = min(candidates, key=lambda item: item[0])
+    return deadline, (deadline - now).total_seconds() / 86400, service
+
+
+def _urgency_component(days: float | None, features: dict[str, bool]) -> float:
+    if features.get("prolong_wait") or (days is not None and days <= 0):
+        return 22.0
+    if days is None:
+        return 4.0
+    if days <= 3:
+        return 20.0
+    if days <= 7:
+        return 16.0
+    if days <= 14:
+        return 11.0
+    if days <= 30:
+        return 6.0
+    return 2.0
+
+
+def _predicted_score(
+    customer: dict[str, Any],
+    weights: dict[str, float],
+    removed_features: set[str],
+) -> int | None:
+    if customer.get("score") is None:
+        return None
+    total = sum(max(_number(weights.get(feature.key, feature.default_weight)), 0.0) for feature in FEATURES)
+    if total <= 0:
+        return 0
+    active = sum(
+        max(_number(weights.get(feature.key, feature.default_weight)), 0.0)
+        for feature in FEATURES
+        if customer.get("features", {}).get(feature.key)
+        and feature.key not in removed_features
+    )
+    return round(100 * active / total)
+
+
+def rescue_queue(
+    customers: list[dict[str, Any]],
+    weights: dict[str, float] | None = None,
+    now: datetime | None = None,
+    limit: int = 10,
+    minimum_score: int = 65,
+) -> dict[str, Any]:
+    """Server-side rescue queue: what to do, by when, and what it is worth.
+
+    Unlike a plain score sort, priority combines the already risk-weighted
+    90-day loss with how actionable the dominant signal is and how little
+    time is left.  ``rescueValue`` never exceeds the customer's estimated
+    loss; urgency changes the order through ``priorityIndex`` rather than
+    inflating the money figure.
+    """
+    moment = now or utcnow()
+    effective_weights = weights or DEFAULT_WEIGHTS
+    items: list[dict[str, Any]] = []
+
+    for customer in customers:
+        score = customer.get("score")
+        if score is None:
+            continue
+        features = customer.get("features", {})
+        if score < minimum_score and not features.get("prolong_wait"):
+            continue
+
+        shortage = _shortage(customer, moment)
+        deadline, days, deadline_service = _nearest_deadline(customer, moment)
+        if features.get("prolong_wait"):
+            action_type = "pay_now"
+            action_label = "Закрыть ожидание оплаты сегодня"
+            action_detail = (
+                "Услуга уже находится в льготном периоде. Нужен короткий "
+                "контакт и готовая ссылка на оплату до отключения."
+            )
+            removed = {"prolong_wait"}
+            actionability = 0.95
+        elif shortage > 0:
+            action_type = "top_up"
+            action_label = "Предложить точное пополнение"
+            action_detail = (
+                f"На ближайшие продления не хватает {_money_cents(shortage)}. "
+                "Это самая дешёвая точка спасения выручки."
+            )
+            removed = {"insufficient_funds"}
+            actionability = 0.92
+        elif features.get("expiring_without_autoprolong"):
+            action_type = "enable_autoprolong"
+            action_label = "Включить автопродление"
+            action_detail = (
+                "Услуга заканчивается без автопродления. Подтверждение "
+                "продления снимает главный временной сигнал."
+            )
+            removed = {"expiring_without_autoprolong"}
+            actionability = 0.88
+        elif features.get("failed_transactions"):
+            action_type = "fix_payment_method"
+            action_label = "Проверить способ оплаты"
+            action_detail = (
+                "Есть незавершённый платёж. Стоит предложить резервный "
+                "способ оплаты до следующего списания."
+            )
+            removed = {"failed_transactions"}
+            actionability = 0.78
+        elif features.get("deleted_services"):
+            action_type = "winback_call"
+            action_label = "Выявить причину удалений"
+            action_detail = (
+                "Клиент уже сокращал набор услуг. Нужен разговор о ценности "
+                "и возможной смене тарифа, а не ещё один общий оффер."
+            )
+            removed = {"deleted_services"}
+            actionability = 0.62
+        else:
+            action_type = "contact"
+            action_label = "Связаться и подтвердить планы"
+            action_detail = "Скор высокий, но одного доминирующего технического сигнала нет."
+            removed = set()
+            actionability = 0.6
+
+        estimated_loss = round(_number(customer.get("estimatedLoss")))
+        rescue_value = round(min(estimated_loss, estimated_loss * actionability))
+        money_component = min(38.0, math.log1p(max(rescue_value, 0) / 100) * 8)
+        priority = round(
+                min(
+                    100.0,
+                    max(
+                        1.0,
+                        score * 0.4
+                        + money_component
+                        + _urgency_component(days, features),
+                    ),
+                )
+            )
+        active_signals = sum(1 for enabled in features.values() if enabled)
+        if deadline is not None and active_signals >= 2:
+            confidence, confidence_score = "high", 90
+        elif deadline is not None or active_signals >= 2:
+            confidence, confidence_score = "medium", 70
+        else:
+            confidence, confidence_score = "low", 50
+
+        items.append(
+            {
+                "customerId": customer["id"],
+                "email": customer.get("email") or "—",
+                "score": score,
+                "riskLevel": customer.get("riskLevel"),
+                "estimatedLoss": estimated_loss,
+                "monthlyRevenue": round(_number(customer.get("monthlyRevenue"))),
+                "rescueValue": rescue_value,
+                "valuePerDay": round(rescue_value / max(1.0, math.ceil(days)) if days is not None else rescue_value),
+                "priorityIndex": priority,
+                "actionType": action_type,
+                "actionLabel": action_label,
+                "actionDetail": action_detail,
+                "requiredTopUp": shortage if shortage > 0 else None,
+                "deadlineAt": iso(deadline) if deadline else None,
+                "dueInDays": round(days, 1) if days is not None else None,
+                "serviceName": deadline_service.get("name") if deadline_service else None,
+                "predictedScoreAfterAction": _predicted_score(
+                    customer, effective_weights, removed
+                ),
+                "confidence": confidence,
+                "confidenceScore": confidence_score,
+                "reasons": list(customer.get("reasons", []))[:2],
+            }
+        )
+
+    items.sort(
+        key=lambda item: (
+            -item["priorityIndex"],
+            -item["rescueValue"],
+            item["dueInDays"] if item["dueInDays"] is not None else 9999,
+        )
+    )
+    for index, item in enumerate(items, start=1):
+        item["rank"] = index
+
+    return {
+        "generatedAt": iso(moment),
+        "items": items[: max(1, limit)],
+        "totals": {
+            "eligibleCustomers": len(items),
+            "criticalCustomers": sum(
+                1 for item in items if item["score"] >= CRITICAL_SCORE_THRESHOLD
+            ),
+            "rescueValue": sum(item["rescueValue"] for item in items),
+            "top3RescueValue": sum(item["rescueValue"] for item in items[:3]),
+            "requiredTopUps": sum(item["requiredTopUp"] or 0 for item in items),
+        },
+        "method": (
+            "Приоритет = скор (40%) + денежная ценность действия + срочность "
+            "по ближайшему дедлайну. Rescue value не превышает уже взвешенную "
+            "оценку потерь на 90 дней; прогноз скора показывает эффект снятия "
+            "главного сигнала при текущих весах."
+        ),
+    }
+
+
+def alert_candidates(
+    customers: list[dict[str, Any]], now: datetime | None = None
+) -> list[dict[str, Any]]:
+    """Currently true risk conditions that deserve an operator alert."""
+    moment = now or utcnow()
+    candidates: list[dict[str, Any]] = []
+
+    for customer in customers:
+        score = customer.get("score")
+        if score is None:
+            continue
+        features = customer.get("features", {})
+        shortage = _shortage(customer, moment)
+        _deadline, days, _service = _nearest_deadline(customer, moment)
+        base = {
+            "customerId": customer["id"],
+            "customerEmail": customer.get("email") or "—",
+            "score": score,
+            "riskLevel": customer.get("riskLevel"),
+            "estimatedLoss": round(_number(customer.get("estimatedLoss"))),
+            "daysToExpiry": round(days, 1) if days is not None else customer.get("daysToExpiry"),
+            "requiredTopUp": shortage or None,
+        }
+
+        def add(
+            event_type: str,
+            severity: str,
+            title: str,
+            message: str,
+            _base: dict[str, Any] = base,
+            _customer_id: Any = customer["id"],
+        ) -> None:
+            candidates.append(
+                {
+                    **_base,
+                    "episodeKey": f"{_customer_id}:{event_type}",
+                    "type": event_type,
+                    "severity": severity,
+                    "title": title,
+                    "message": message,
+                }
+            )
+
+        if score >= CRITICAL_SCORE_THRESHOLD:
+            add(
+                "critical_score",
+                "critical",
+                f"Критический риск: {score} из 100",
+                (customer.get("reasons") or ["Скор выше критического порога 80."])[0],
+            )
+        if features.get("prolong_wait"):
+            add(
+                "payment_waiting",
+                "critical",
+                "Услуга уже ожидает оплаты",
+                "Клиент находится в льготном периоде. Если оплату не закрыть сейчас, услуга может отключиться.",
+            )
+
+        expiring = [
+            service
+            for service in customer.get("services", [])
+            if _is_billable(service)
+            and not service.get("autoprolong", False)
+            and (_service_days(service, moment) is not None)
+            and 0 <= float(_service_days(service, moment)) <= 3
+        ]
+        if expiring:
+            add(
+                "expiry_72h",
+                "critical",
+                "До окончания услуги меньше 72 часов",
+                "Автопродление выключено. Нужно подтверждение продления или включённое автопродление сегодня.",
+            )
+        if features.get("insufficient_funds") and shortage > 0:
+            add(
+                "insufficient_funds",
+                "critical" if score >= 65 or shortage >= 10_000 else "warning",
+                "Не хватает денег на продление",
+                f"До ближайших списаний не хватает {_money_cents(shortage)}. Точное пополнение снимает сигнал.",
+            )
+        if features.get("failed_transactions") and score >= RISK_THRESHOLDS["high"]:
+            add(
+                "failed_payment",
+                "warning",
+                "Незавершённый платёж у клиента высокого риска",
+                "Проверьте способ оплаты до следующего продления.",
+            )
+        if base["estimatedLoss"] >= LARGE_LOSS_THRESHOLD_CENTS and score >= RISK_THRESHOLDS["high"]:
+            add(
+                "large_revenue_at_risk",
+                "critical" if base["estimatedLoss"] >= 150_000 else "warning",
+                "Крупная выручка под угрозой",
+                f"На горизонте 90 дней под риском {_money_cents(base['estimatedLoss'])}.",
+            )
+        if features.get("deleted_services") and score >= RISK_THRESHOLDS["high"]:
+            add(
+                "deletion_pattern",
+                "warning",
+                "Клиент уже сокращал услуги",
+                "Повторяющиеся удаления усиливают риск полного ухода. Лучше выяснить причину до следующего продления.",
+            )
+
+    candidates.sort(
+        key=lambda item: (
+            _ALERT_SEVERITY_ORDER.get(item["severity"], 9),
+            -item["estimatedLoss"],
+            -item["score"],
+        )
+    )
+    return candidates
+
+
+def customer_risk_state(customers: list[dict[str, Any]]) -> dict[str, Any]:
+    """Compact state used by the monitor to detect changes between polls."""
+    return {
+        str(customer["id"]): {
+            "score": customer.get("score"),
+            "riskLevel": customer.get("riskLevel"),
+            "estimatedLoss": round(_number(customer.get("estimatedLoss"))),
+            "features": sorted(
+                key for key, enabled in customer.get("features", {}).items() if enabled
+            ),
+        }
+        for customer in customers
+    }
