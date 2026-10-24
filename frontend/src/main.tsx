@@ -9,6 +9,7 @@ import { Login } from "./Login";
 import { LiquidGlassDefs } from "./components/LiquidGlass";
 import "./styles/tokens.css";
 import "./styles/liquid-glass.css";
+import "./styles/liquid-surface.css";
 import "./styles/dashboard.css";
 import "./styles/liquid-glass-overrides.css";
 import "./styles/liquid-glass-refraction.css";
