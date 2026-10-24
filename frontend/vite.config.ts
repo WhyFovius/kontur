@@ -1,6 +1,17 @@
 import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
 
+// The API host can be overridden so a worktree (or a second checkout)
+// can run against its own backend instead of the default port.
+// `process` is not typed in this project (no @types/node), so the env
+// lookup is done through Vite's own `loadEnv`-free helper: Vite exposes
+// the runtime env on `import.meta.env` only for VITE_* keys, hence the
+// guarded global lookup.
+const envApiTarget =
+  (globalThis as { process?: { env?: Record<string, string | undefined> } }).process?.env
+    ?.KONTUR_API_TARGET;
+const apiTarget = envApiTarget ?? "http://127.0.0.1:8000";
+
 // The production bundle is served by FastAPI from /static (strict CSP:
 // script-src 'self', style-src 'self'). Therefore:
 //  - base points at the mounted static dir,
@@ -35,8 +46,8 @@ export default defineConfig({
     // Vite's host allow-list would otherwise reject it with HTTP 403.
     allowedHosts: true,
     proxy: {
-      "/api": "http://127.0.0.1:8000",
-      "/health": "http://127.0.0.1:8000",
+      "/api": apiTarget,
+      "/health": apiTarget,
     },
   },
 });
