@@ -17,6 +17,7 @@ import { fadeRise, pageVariants, springEmphasized, springSnappy } from "./motion
 import { CustomerList, type SavedView } from "./components/CustomerList";
 import { RiskDonut } from "./components/RiskDonut";
 import { RiskStream } from "./components/RiskStream";
+import { GlassFolders } from "./components/GlassFolders";
 import { KpiCards, KpiSkeletons } from "./components/KpiCards";
 import { WeightControls } from "./components/WeightControls";
 import { RiskBars } from "./components/RiskBars";
@@ -956,6 +957,16 @@ export function Dashboard() {
           </motion.article>
         )}
       </section>
+
+      {summary && (
+        <GlassFolders
+          summary={summary}
+          customers={landscapeCustomers}
+          losses={levelLosses}
+          onSelectLevel={handleOverviewRiskSelect}
+          onOpen={(customer) => openCustomer(customer.id, customer.riskLevel)}
+        />
+      )}
 
       {summary && (
         <section className="overview-insights" aria-label="Сценарии, динамика и качество данных">
