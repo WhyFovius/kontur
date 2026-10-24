@@ -48,19 +48,34 @@ export function ThemeToggle({
       whileTap={{ scale: 0.88 }}
       transition={springSnappy}
     >
-      <AnimatePresence mode="popLayout" initial={false}>
+      {/* Stacked layers instead of AnimatePresence: nothing ever gets
+          "popped" out of flow, so the icon physically cannot fly away. */}
+      <span className="theme-icon-stack" aria-hidden="true">
         <motion.span
-          key={theme}
-          className="theme-icon-swap"
-          initial={{ opacity: 0, rotate: -35, scale: 0.65 }}
-          animate={{ opacity: 1, rotate: 0, scale: 1 }}
-          exit={{ opacity: 0, rotate: 35, scale: 0.65 }}
+          className="theme-icon-layer"
+          initial={false}
+          animate={
+            isDark
+              ? { opacity: 1, rotate: 0, scale: 1 }
+              : { opacity: 0, rotate: 55, scale: 0.4 }
+          }
           transition={springSnappy}
-          aria-hidden="true"
         >
-          {isDark ? <IconSun /> : <IconMoon />}
+          <IconSun />
         </motion.span>
-      </AnimatePresence>
+        <motion.span
+          className="theme-icon-layer"
+          initial={false}
+          animate={
+            isDark
+              ? { opacity: 0, rotate: -55, scale: 0.4 }
+              : { opacity: 1, rotate: 0, scale: 1 }
+          }
+          transition={springSnappy}
+        >
+          <IconMoon />
+        </motion.span>
+      </span>
     </motion.button>
   );
 }
@@ -329,34 +344,60 @@ export function Topbar({
           onClick={onUploadClick}
           disabled={uploading}
           aria-busy={uploading}
+          aria-label={
+            uploadPhase === "success"
+              ? "Снимок обновлён. Загрузить ещё один снимок"
+              : uploading
+                ? "Идёт загрузка снимка"
+                : "Загрузить снимок"
+          }
           aria-describedby="snapshotHelp"
           whileTap={{ scale: 0.97 }}
           transition={springSnappy}
         >
-          <AnimatePresence mode="popLayout" initial={false}>
+          {/* Same stacked-layer pattern as the theme toggle: a hidden
+              sizer pins the width, labels crossfade in place. */}
+          <span className="upload-label-wrap upload-label-stack" aria-hidden="true">
+            <span className="upload-label-sizer">
+              <IconUpload /> Загрузить снимок
+            </span>
             <motion.span
-              key={uploadPhase}
-              className="upload-label-wrap"
-              initial={{ opacity: 0, y: 8, scale: 0.95 }}
-              animate={{ opacity: 1, y: 0, scale: 1 }}
-              exit={{ opacity: 0, y: -8, scale: 0.95 }}
+              className="upload-label-layer"
+              initial={false}
+              animate={
+                uploadPhase === "idle"
+                  ? { opacity: 1, y: 0, scale: 1 }
+                  : { opacity: 0, y: 6, scale: 0.92 }
+              }
               transition={springSnappy}
             >
-              {uploadPhase === "success" ? (
-                <>
-                  <IconCheck /> Снимок обновлён
-                </>
-              ) : uploading ? (
-                <>
-                  <span className="button-spinner" aria-hidden="true" /> Загружаем…
-                </>
-              ) : (
-                <>
-                  <IconUpload /> Загрузить снимок
-                </>
-              )}
+              <IconUpload /> Загрузить снимок
             </motion.span>
-          </AnimatePresence>
+            <motion.span
+              className="upload-label-layer"
+              initial={false}
+              animate={
+                uploading
+                  ? { opacity: 1, y: 0, scale: 1 }
+                  : { opacity: 0, y: 6, scale: 0.92 }
+              }
+              transition={springSnappy}
+            >
+              <span className="button-spinner" aria-hidden="true" /> Загружаем…
+            </motion.span>
+            <motion.span
+              className="upload-label-layer"
+              initial={false}
+              animate={
+                uploadPhase === "success"
+                  ? { opacity: 1, y: 0, scale: 1 }
+                  : { opacity: 0, y: 6, scale: 0.92 }
+              }
+              transition={springSnappy}
+            >
+              <IconCheck /> Снимок обновлён
+            </motion.span>
+          </span>
         </motion.button>
         <motion.button
           type="button"
