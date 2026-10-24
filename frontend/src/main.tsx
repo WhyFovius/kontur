@@ -11,6 +11,7 @@ import "./styles/tokens.css";
 import "./styles/liquid-glass.css";
 import "./styles/dashboard.css";
 import "./styles/liquid-glass-overrides.css";
+import "./styles/liquid-glass-refraction.css";
 import "./styles/login.css";
 
 // FastAPI keeps the server-side auth gate: "/" is only served to a signed-in
