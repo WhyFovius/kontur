@@ -43,6 +43,7 @@ import {
   type UploadPhase,
 } from "./components/Chrome";
 import { IconArrowRight, IconArrowUpRight, IconChevron, IconUpload } from "./icons";
+import { MascotImage, MascotStage, ShapeLoader } from "./components/Brand";
 
 const PAGE_SIZE = 50;
 const PAGE_ORDER: SectionId[] = ["overview", "customers", "model"];
@@ -50,6 +51,7 @@ const PAGE_ORDER: SectionId[] = ["overview", "customers", "model"];
 function PanelSkeleton() {
   return (
     <div className="panel panel-skeleton" aria-hidden="true">
+      <ShapeLoader />
       <span className="skeleton skeleton-line skeleton-line-narrow" />
       <span className="skeleton skeleton-line skeleton-line-wide" />
       <span className="skeleton skeleton-line" />
@@ -159,9 +161,14 @@ function TodayQueue({
           ))}
         </div>
       ) : items.length === 0 ? (
-        <div className="table-state queue-empty">
-          <strong>Клиентов с высоким риском сейчас нет</strong>
-          <span>Очередь пуста — можно заняться плановыми контактами среднего риска.</span>
+        <div className="table-state queue-empty queue-empty-mascot">
+          <span className="queue-mascot" aria-hidden="true">
+            <MascotImage pose="calm" />
+          </span>
+          <span className="queue-empty-copy">
+            <strong>Клиентов с высоким риском сейчас нет</strong>
+            <span>Очередь пуста — можно заняться плановыми контактами среднего риска.</span>
+          </span>
         </div>
       ) : (
         <div className="queue-list" role="list">
@@ -333,21 +340,41 @@ export function Dashboard() {
     });
   }, []);
 
-  /* Pointer-follow spotlight for panels (delegated, transform-free). */
+  /* Pointer-follow spotlight for panels: delegated and rAF-throttled, so
+     pointermove never paints more than once per frame. */
   const spotPanelRef = useRef<HTMLElement | null>(null);
+  const spotFrameRef = useRef<number | null>(null);
+  const spotPointRef = useRef<{ target: HTMLElement; x: number; y: number } | null>(null);
   const handleSpotlight = (event: React.PointerEvent<HTMLElement>) => {
-    const panel = (event.target as HTMLElement).closest(".panel") as HTMLElement | null;
-    if (spotPanelRef.current && spotPanelRef.current !== panel) {
-      spotPanelRef.current.style.setProperty("--spot", "0");
-    }
-    spotPanelRef.current = panel;
-    if (!panel) return;
-    const rect = panel.getBoundingClientRect();
-    panel.style.setProperty("--mx", `${event.clientX - rect.left}px`);
-    panel.style.setProperty("--my", `${event.clientY - rect.top}px`);
-    panel.style.setProperty("--spot", "1");
+    spotPointRef.current = {
+      target: event.target as HTMLElement,
+      x: event.clientX,
+      y: event.clientY,
+    };
+    if (spotFrameRef.current !== null) return;
+    spotFrameRef.current = window.requestAnimationFrame(() => {
+      spotFrameRef.current = null;
+      const point = spotPointRef.current;
+      if (!point) return;
+      const panel = point.target.closest(".panel") as HTMLElement | null;
+      if (spotPanelRef.current && spotPanelRef.current !== panel) {
+        spotPanelRef.current.style.setProperty("--spot", "0");
+      }
+      spotPanelRef.current = panel;
+      if (!panel) return;
+      const rect = panel.getBoundingClientRect();
+      const snap = (value: number) => Math.round(value / 4) * 4;
+      panel.style.setProperty("--mx", `${snap(point.x - rect.left)}px`);
+      panel.style.setProperty("--my", `${snap(point.y - rect.top)}px`);
+      panel.style.setProperty("--spot", "1");
+    });
   };
   const clearSpotlight = () => {
+    if (spotFrameRef.current !== null) {
+      window.cancelAnimationFrame(spotFrameRef.current);
+      spotFrameRef.current = null;
+    }
+    spotPointRef.current = null;
     spotPanelRef.current?.style.setProperty("--spot", "0");
     spotPanelRef.current = null;
   };
@@ -911,7 +938,7 @@ export function Dashboard() {
 
   const pageFooter = (
     <footer className="page-footer">
-      <span>Контур · Аналитика удержания</span>
+      <span>Aéza · Контур удержания</span>
       <span>Источник: евроценты · Панель: евро</span>
     </footer>
   );
@@ -928,9 +955,9 @@ export function Dashboard() {
             Риск оттока<span className="heading-period">.</span>
           </h1>
           <p>
-            Контур превращает снимок аккаунтов в очередь действий: кто уходит, почему
-            именно сейчас и сколько выручки это стоит — с объяснением каждого балла и
-            what-if моделью.
+            Aéza Контур превращает снимок аккаунтов в очередь действий: кто уходит,
+            почему именно сейчас и сколько выручки это стоит — с объяснением каждого
+            балла и what-if моделью.
           </p>
           <div className="hero-actions">
             <md-filled-button trailingIcon onClick={showHighRisk}>
@@ -951,10 +978,31 @@ export function Dashboard() {
           </div>
         </div>
         <div className="heading-side">
-          <span className="date-label">{todayLabel()}</span>
-          <a href="/api/v1/docs" target="_blank" rel="noreferrer" className="docs-link">
-            API и документация <IconArrowUpRight />
-          </a>
+          <div className="heading-meta">
+            <span className="date-label">{todayLabel()}</span>
+            <a href="/api/v1/docs" target="_blank" rel="noreferrer" className="docs-link">
+              API и документация <IconArrowUpRight />
+            </a>
+          </div>
+          <MascotStage
+            eyebrow="Aéza-тян · ассистент"
+            title={
+              summary
+                ? summary.highRisk > 0
+                  ? `${integer(summary.highRisk)} ${customerWord(summary.highRisk)} ждут контакта`
+                  : "Срочных рисков сейчас нет"
+                : "Собираю свежий снимок"
+            }
+            text={
+              summary
+                ? summary.highRisk > 0
+                  ? "Начну с высокого риска: там самая дорогая выручка и понятные причины."
+                  : "Можно спокойно проверить средний сегмент и плановые продления."
+                : "Проверяю клиентов, услуги и сигналы модели."
+            }
+            actionLabel={summary && summary.highRisk > 0 ? "Открыть очередь" : undefined}
+            onAction={summary && summary.highRisk > 0 ? showHighRisk : undefined}
+          />
         </div>
       </section>
 

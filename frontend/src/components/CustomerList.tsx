@@ -19,6 +19,7 @@ import {
 } from "../motion";
 import { AnimatedNumber } from "./AnimatedNumber";
 import { useDragSelect } from "./useDragSelect";
+import { BrandPattern, MascotImage } from "./Brand";
 import {
   IconArrowLeft,
   IconArrowRight,
@@ -27,7 +28,6 @@ import {
   IconChevron,
   IconCopy,
   IconMail,
-  IconUsers,
 } from "../icons";
 
 /* ------------------------------------------------------------------ */
@@ -902,18 +902,21 @@ export function CustomerList(props: CustomerListProps) {
           animate={{ opacity: 1, scale: 1 }}
           transition={springEmphasized}
         >
-          <motion.span
-            className="empty-state-icon"
-            initial={{ y: 10, opacity: 0 }}
-            animate={{ y: [0, -5, 0], opacity: 1 }}
+          <motion.div
+            className="empty-mascot-stage"
+            initial={{ y: 14, opacity: 0, scale: 0.96 }}
+            animate={{ y: [0, -5, 0], opacity: 1, scale: 1 }}
             transition={{
               opacity: { duration: 0.25 },
-              y: { duration: 3.6, repeat: Infinity, ease: "easeInOut" },
+              scale: { duration: 0.35 },
+              y: { duration: 4.2, repeat: Infinity, ease: "easeInOut" },
             }}
             aria-hidden="true"
           >
-            <IconUsers />
-          </motion.span>
+            <BrandPattern />
+            <MascotImage pose="calm" />
+            <span className="empty-mascot-badge">Aéza-тян</span>
+          </motion.div>
           <strong>{emptyTitle}</strong>
           <span>{emptyText}</span>
           {risk ? (

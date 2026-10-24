@@ -7,12 +7,12 @@ import { DotNumber } from "./DotNumber";
 
 type Level = "high" | "medium" | "low";
 
-/* Fixed series colours tuned for this card's deep-violet gradient
-   (rendered identically in both themes, like the reference bento). */
+/* Fixed semantic series colours tuned for the Aéza black/navy card
+   (rendered identically in both themes). */
 const LEVELS: { key: Level; label: string; color: string }[] = [
-  { key: "high", label: "Высокий", color: "#ff8f7d" },
-  { key: "medium", label: "Средний", color: "#f5c451" },
-  { key: "low", label: "Низкий", color: "#7fe3c0" },
+  { key: "high", label: "Высокий", color: "#ff5c86" },
+  { key: "medium", label: "Средний", color: "#ff9e57" },
+  { key: "low", label: "Низкий", color: "#2fd3a6" },
 ];
 
 /* Finer buckets near "now" — the nearest expiries are what retention
