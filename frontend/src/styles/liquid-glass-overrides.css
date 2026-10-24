@@ -538,6 +538,28 @@ md-filled-button.upload-button {
   }
 }
 
+/* ----- risk stream: a readable glass instrument, not a dark slab ----- */
+
+.riskstream-panel {
+  color: var(--md-on-surface);
+}
+.riskstream-panel h2 { color: var(--md-on-surface); }
+.riskstream-legend { color: var(--md-on-surface-variant); }
+.riskstream-caption { color: var(--md-on-surface); }
+.riskstream-sub { color: var(--md-on-surface-variant); }
+.riskstream-readout {
+  color: var(--md-on-surface-variant);
+  background: color-mix(in srgb, var(--md-surface-lowest) 46%, transparent);
+  border-color: color-mix(in srgb, var(--glass-edge-light) 26%, transparent);
+  border-radius: 999px;
+  box-shadow: inset 0 1px 0 color-mix(in srgb, var(--glass-inner-shadow) 62%, transparent);
+}
+.riskstream-readout strong { color: var(--md-on-surface); }
+.riskstream-axis { color: var(--md-on-surface-variant); }
+.riskstream-axis span.is-active { color: var(--md-on-surface); }
+.riskstream-empty { color: var(--md-on-surface-variant); }
+.riskstream-total-value { color: var(--md-on-surface); }
+
 /* ----- generic glass chips and controls ----- */
 
 .saved-view-chip,
