@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { AnimatePresence, motion } from "framer-motion";
 import type {
   Customer,
@@ -14,11 +14,20 @@ import { api, ApiError } from "./api";
 import { customerWord, integer, money as moneyFormat, money, timeLabel, todayLabel } from "./format";
 import { useTheme } from "./theme";
 import { fadeRise, pageVariants, springEmphasized, springSnappy } from "./motion";
-import { CustomerList } from "./components/CustomerList";
+import { CustomerList, type SavedView } from "./components/CustomerList";
 import { RiskDonut } from "./components/RiskDonut";
 import { ForecastChart } from "./components/ForecastChart";
 import { KpiCards, KpiSkeletons } from "./components/KpiCards";
 import { WeightControls } from "./components/WeightControls";
+import { RiskLandscape } from "./components/RiskLandscape";
+import { WhatIfPanel } from "./components/WhatIf";
+import {
+  DataQuality,
+  RevenueCalculator,
+  ScoreHistory,
+  type HistoryPoint,
+} from "./components/Insights";
+import { lossByLevel, simulateWeights, type LevelCounts } from "./simulate";
 import { AnimatedNumber } from "./components/AnimatedNumber";
 import {
   MobileNav,
@@ -35,6 +44,52 @@ const PAGE_SIZE = 50;
 const PAGE_ORDER: SectionId[] = ["overview", "customers", "model"];
 
 type SaveStatus = "synced" | "saving" | "error";
+
+/**
+ * Browser-local product memory: named queue views and the portfolio
+ * history. The API has no persistence for either yet (see REVIEW.md —
+ * server roadmap), so these live in localStorage and are labelled as
+ * local in the UI instead of pretending to be shared product data.
+ */
+const VIEWS_KEY = "kontur.savedViews.v1";
+const HISTORY_KEY = "kontur.portfolioHistory.v1";
+
+function loadJSON(key: string): unknown {
+  try {
+    const raw = window.localStorage.getItem(key);
+    return raw ? JSON.parse(raw) : null;
+  } catch {
+    return null;
+  }
+}
+
+function loadSavedViews(): SavedView[] {
+  const raw = loadJSON(VIEWS_KEY);
+  if (!Array.isArray(raw)) return [];
+  return raw.filter(
+    (value): value is SavedView =>
+      Boolean(value && typeof value === "object" && "id" in value && "name" in value),
+  );
+}
+
+function loadHistory(): HistoryPoint[] {
+  const raw = loadJSON(HISTORY_KEY);
+  if (!Array.isArray(raw)) return [];
+  return raw
+    .filter(
+      (value): value is HistoryPoint =>
+        Boolean(value && typeof value === "object" && "t" in value && "loss" in value),
+    )
+    .slice(-60);
+}
+
+function storeJSON(key: string, value: unknown): void {
+  try {
+    window.localStorage.setItem(key, JSON.stringify(value));
+  } catch {
+    /* storage can be unavailable (private mode) — features degrade quietly */
+  }
+}
 
 function pageFromHash(): SectionId {
   const raw = window.location.hash.replace("#", "");
@@ -229,6 +284,11 @@ export function Dashboard() {
   const [uploadPhase, setUploadPhase] = useState<UploadPhase>("idle");
   const [dragActive, setDragActive] = useState(false);
   const [liveMessage, setLiveMessage] = useState("");
+  const [landscapeCustomers, setLandscapeCustomers] = useState<Customer[]>([]);
+  const [weightDraft, setWeightDraft] = useState<Record<string, number> | null>(null);
+  const [views, setViews] = useState<SavedView[]>(() => loadSavedViews());
+  const [activeViewId, setActiveViewId] = useState<string | null>(null);
+  const [historyPoints, setHistoryPoints] = useState<HistoryPoint[]>(() => loadHistory());
 
   const fileInputRef = useRef<HTMLInputElement>(null);
   const pageHeadingRef = useRef<HTMLHeadingElement>(null);
@@ -236,13 +296,11 @@ export function Dashboard() {
   pageRef.current = page;
   const firstPageRender = useRef(true);
   const refreshPromise = useRef<Promise<void> | null>(null);
-  const pendingWeights = useRef<Record<string, number>>({});
-  const saveTimer = useRef<number | null>(null);
-  const savePromise = useRef<Promise<void> | null>(null);
   const toastTimer = useRef<number | null>(null);
   const dragCounter = useRef(0);
   const summaryRef = useRef<Summary | null>(null);
   const signatureRef = useRef<string>("");
+  const historyRef = useRef<HistoryPoint[]>(loadHistory());
 
   const showToast = useCallback((message: string, persistent = false) => {
     setToast({ id: Date.now(), message, persistent });
@@ -337,8 +395,17 @@ export function Dashboard() {
           limit: "5",
           offset: "0",
         });
+        // Top-100 by score powers the 3D landscape, the what-if simulator
+        // and the data-quality details. All subset-based widgets say so.
+        const landscapeParams = new URLSearchParams({
+          sort: "score",
+          order: "desc",
+          limit: "100",
+          offset: "0",
+        });
         const requests: [
           Promise<Summary>,
+          Promise<CustomerListData>,
           Promise<CustomerListData>,
           Promise<CustomerListData>,
           Promise<ModelSettings | null>,
@@ -346,9 +413,11 @@ export function Dashboard() {
           api<Summary>("/api/v1/analytics/summary"),
           api<CustomerListData>(`/api/v1/customers?${params}`),
           api<CustomerListData>(`/api/v1/customers?${queueParams}`),
+          api<CustomerListData>(`/api/v1/customers?${landscapeParams}`),
           includeSettings ? api<ModelSettings>("/api/v1/model/settings") : Promise.resolve(null),
         ];
-        const [summaryData, firstPage, queueData, freshSettings] = await Promise.all(requests);
+        const [summaryData, firstPage, queueData, landscapeData, freshSettings] =
+          await Promise.all(requests);
         let customerData = firstPage;
         let nextOffset = effective.offset;
         if (effective.offset > 0 && effective.offset >= customerData.total) {
@@ -361,7 +430,7 @@ export function Dashboard() {
         }
 
         // Avoid pointless re-renders (and re-animations) on identical polls.
-        const signature = JSON.stringify([summaryData, customerData, queueData, freshSettings]);
+        const signature = JSON.stringify([summaryData, customerData, queueData, landscapeData, freshSettings]);
         if (signature !== signatureRef.current) {
           signatureRef.current = signature;
           const previous = summaryRef.current;
@@ -379,6 +448,20 @@ export function Dashboard() {
           setSummary(summaryData);
           setCustomers(customerData);
           setTopQueue(queueData);
+          setLandscapeCustomers(landscapeData.items);
+          // Record a history point only when the portfolio really moved.
+          const point: HistoryPoint = {
+            t: Date.now(),
+            loss: summaryData.estimatedLoss,
+            high: summaryData.highRisk,
+          };
+          const lastPoint = historyRef.current[historyRef.current.length - 1];
+          if (!lastPoint || lastPoint.loss !== point.loss || lastPoint.high !== point.high) {
+            const nextHistory = [...historyRef.current, point].slice(-60);
+            historyRef.current = nextHistory;
+            setHistoryPoints(nextHistory);
+            storeJSON(HISTORY_KEY, nextHistory);
+          }
           if (freshSettings) setSettings(freshSettings);
         }
         setLastUpdated(`Обновлено ${timeLabel()}`);
@@ -446,56 +529,80 @@ export function Dashboard() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  /* ---------------- weights ---------------- */
+  /* ---------------- weights: draft + what-if, explicit apply ---------------- */
 
-  const flushWeightSaves = useCallback(async (): Promise<void> => {
-    if (savePromise.current || Object.keys(pendingWeights.current).length === 0) return;
-    const changes = pendingWeights.current;
-    pendingWeights.current = {};
-    const run = (async () => {
-      try {
-        const updated = await api<ModelSettings>("/api/v1/model/settings", {
-          method: "PATCH",
-          body: JSON.stringify({ weights: changes }),
-        });
-        // Preserve any newer optimistic edits made while the request flew.
-        setSettings((previous) =>
-          previous
-            ? { ...updated, weights: { ...updated.weights, ...previous.weights, ...pendingWeights.current } }
-            : updated,
-        );
-        signatureRef.current = "";
-        setSaveStatus("synced");
-        await refreshRef.current(false);
-      } catch (error) {
-        setSaveStatus("error");
-        if (error instanceof ApiError && error.status !== 401) {
-          showToast(`Не удалось сохранить коэффициент: ${error.message}`, true);
-        }
-      } finally {
-        savePromise.current = null;
-        if (Object.keys(pendingWeights.current).length > 0) {
-          void flushWeightSaves();
-        }
-      }
-    })();
-    savePromise.current = run;
-    await run;
-  }, [showToast]);
+  // Sliders edit a local draft only. The what-if panel simulates its effect
+  // instantly; the server applies weights (and re-scores everyone) only on
+  // "Применить веса". This replaces the previous autosave-on-change flow.
+  useEffect(() => {
+    if (settings) setWeightDraft((draft) => draft ?? settings.weights);
+  }, [settings]);
 
-  const handleWeightChange = useCallback(
-    (key: string, value: number) => {
-      const rounded = Math.round(value);
-      pendingWeights.current[key] = rounded;
-      setSettings((previous) =>
-        previous ? { ...previous, weights: { ...previous.weights, [key]: rounded } } : previous,
-      );
-      setSaveStatus("saving");
-      if (saveTimer.current) window.clearTimeout(saveTimer.current);
-      saveTimer.current = window.setTimeout(() => void flushWeightSaves(), 320);
-    },
-    [flushWeightSaves],
+  const handleWeightChange = useCallback((key: string, value: number) => {
+    const rounded = Math.round(value);
+    setWeightDraft((draft) => (draft ? { ...draft, [key]: rounded } : draft));
+  }, []);
+
+  const weightsDirty = Boolean(
+    settings &&
+      weightDraft &&
+      Object.keys(weightDraft).some((key) => settings.weights[key] !== weightDraft[key]),
   );
+
+  const simulation = useMemo(
+    () =>
+      settings && weightDraft
+        ? simulateWeights(landscapeCustomers, weightDraft, settings.thresholds)
+        : null,
+    [landscapeCustomers, settings, weightDraft],
+  );
+  const landscapeCounts = useMemo<LevelCounts>(() => {
+    const counts: LevelCounts = { high: 0, medium: 0, low: 0, unrated: 0 };
+    landscapeCustomers.forEach((customer) => {
+      counts[customer.riskLevel] += 1;
+    });
+    return counts;
+  }, [landscapeCustomers]);
+  const landscapeLoss = useMemo(
+    () =>
+      landscapeCustomers.reduce(
+        (sum, customer) => sum + (Number(customer.estimatedLoss) || 0),
+        0,
+      ),
+    [landscapeCustomers],
+  );
+  const levelLosses = useMemo(() => lossByLevel(landscapeCustomers), [landscapeCustomers]);
+
+  const applyWeights = useCallback(async (): Promise<void> => {
+    if (!settings || !weightDraft) return;
+    const changes: Record<string, number> = {};
+    Object.entries(weightDraft).forEach(([key, value]) => {
+      if (settings.weights[key] !== value) changes[key] = value;
+    });
+    if (Object.keys(changes).length === 0) return;
+    setSaveStatus("saving");
+    try {
+      const updated = await api<ModelSettings>("/api/v1/model/settings", {
+        method: "PATCH",
+        body: JSON.stringify({ weights: changes }),
+      });
+      setSettings(updated);
+      setWeightDraft(updated.weights);
+      signatureRef.current = "";
+      setSaveStatus("synced");
+      showToast("Веса применены — сервер пересчитал все оценки");
+      await refreshRef.current(false);
+    } catch (error) {
+      setSaveStatus("error");
+      if (error instanceof ApiError && error.status !== 401) {
+        showToast(`Не удалось применить веса: ${error.message}`, true);
+      }
+    }
+  }, [settings, showToast, weightDraft]);
+
+  const resetDraft = useCallback(() => {
+    if (settings) setWeightDraft(settings.weights);
+  }, [settings]);
 
   /* ---------------- table controls ---------------- */
 
@@ -508,6 +615,7 @@ export function Dashboard() {
 
   const handleSort = useCallback(
     (next: SortKey) => {
+      setActiveViewId(null);
       setDirection(1);
       if (sort === next) {
         const nextOrder: SortOrder = order === "asc" ? "desc" : "asc";
@@ -528,6 +636,7 @@ export function Dashboard() {
 
   const handleRiskChange = useCallback(
     (next: RiskLevel | "") => {
+      setActiveViewId(null);
       setRisk(next);
       setOffset(0);
       setExpandedId(null);
@@ -582,6 +691,77 @@ export function Dashboard() {
       );
     },
     [goToPage, reloadWith],
+  );
+
+  // Deep-open used by the 3D landscape and the what-if movers list.
+  const openCustomer = useCallback(
+    (id: string, level: RiskLevel) => {
+      setSort("score");
+      setOrder("desc");
+      setRisk(level);
+      setOffset(0);
+      setDirection(1);
+      setExpandedId(id);
+      goToPage("customers");
+      reloadWith(
+        { sort: "score", order: "desc", risk: level, offset: 0 },
+        "Не удалось открыть клиента",
+      );
+    },
+    [goToPage, reloadWith],
+  );
+
+  const showUnrated = useCallback(() => {
+    handleRiskChange("unrated");
+    goToPage("customers");
+  }, [goToPage, handleRiskChange]);
+
+  /* ---------------- saved views (browser-local) ---------------- */
+
+  const persistViews = useCallback((nextViews: SavedView[]) => {
+    setViews(nextViews);
+    storeJSON(VIEWS_KEY, nextViews);
+  }, []);
+
+  const handleSaveView = useCallback(
+    (name: string) => {
+      const view: SavedView = {
+        id: `view-${Date.now()}`,
+        name,
+        risk,
+        sort,
+        order,
+      };
+      persistViews([...views, view]);
+      setActiveViewId(view.id);
+      showToast(`Вид «${name}» сохранён в этом браузере`);
+    },
+    [order, persistViews, risk, showToast, sort, views],
+  );
+
+  const handleApplyView = useCallback(
+    (view: SavedView) => {
+      setActiveViewId(view.id);
+      setSort(view.sort);
+      setOrder(view.order);
+      setRisk(view.risk);
+      setOffset(0);
+      setDirection(1);
+      setExpandedId(null);
+      reloadWith(
+        { sort: view.sort, order: view.order, risk: view.risk, offset: 0 },
+        "Не удалось применить вид",
+      );
+    },
+    [reloadWith],
+  );
+
+  const handleDeleteView = useCallback(
+    (id: string) => {
+      persistViews(views.filter((view) => view.id !== id));
+      setActiveViewId((current) => (current === id ? null : current));
+    },
+    [persistViews, views],
   );
 
   /* ---------------- snapshot upload (+ drag & drop) ---------------- */
@@ -697,9 +877,37 @@ export function Dashboard() {
             Риск оттока<span className="heading-period">.</span>
           </h1>
           <p>
-            Приоритеты команды, причины риска и выручка под угрозой — в одном
-            рабочем пространстве, которое пересчитывается на лету.
+            Контур превращает снимок аккаунтов в очередь действий: кто уходит, почему
+            именно сейчас и сколько выручки это стоит — с объяснением каждого балла,
+            3D-картой риска и what-if моделью.
           </p>
+          <div className="hero-actions">
+            <motion.button
+              type="button"
+              className="button button-primary"
+              onClick={showHighRisk}
+              whileTap={{ scale: 0.96 }}
+              transition={springSnappy}
+            >
+              Открыть Risk Inbox{summary ? ` · ${integer(summary.highRisk)}` : ""}{" "}
+              <IconArrowRight />
+            </motion.button>
+            <motion.button
+              type="button"
+              className="button button-tonal"
+              onClick={() => goToPage("model")}
+              whileTap={{ scale: 0.96 }}
+              transition={springSnappy}
+            >
+              What-if: покрутить веса
+            </motion.button>
+            {summary && (
+              <span className="hero-loss-chip">
+                Под угрозой на 90 дней:{" "}
+                <AnimatedNumber value={summary.estimatedLoss} format={moneyFormat} />
+              </span>
+            )}
+          </div>
         </div>
         <div className="heading-side">
           <span className="date-label">{todayLabel()}</span>
@@ -714,6 +922,11 @@ export function Dashboard() {
       ) : (
         <KpiSkeletons />
       )}
+
+      <RiskLandscape
+        customers={landscapeCustomers}
+        onOpen={(customer) => openCustomer(customer.id, customer.riskLevel)}
+      />
 
       <section className="overview-analytics" aria-label="Сводная аналитика">
         <motion.article
@@ -773,6 +986,18 @@ export function Dashboard() {
         </motion.article>
       </section>
 
+      {summary && (
+        <section className="overview-insights" aria-label="Сценарии, динамика и качество данных">
+          <RevenueCalculator lossHigh={levelLosses.high} lossMedium={levelLosses.medium} />
+          <ScoreHistory points={historyPoints} />
+          <DataQuality
+            summary={summary}
+            customers={landscapeCustomers}
+            onShowUnrated={showUnrated}
+          />
+        </section>
+      )}
+
       <TodayQueue
         items={topQueue.items}
         total={topQueue.total}
@@ -814,6 +1039,13 @@ export function Dashboard() {
         aria-label="Список клиентов"
       >
         <CustomerList
+          weights={settings?.weights}
+          featureLabels={settings?.features}
+          views={views}
+          activeViewId={activeViewId}
+          onApplyView={handleApplyView}
+          onSaveView={handleSaveView}
+          onDeleteView={handleDeleteView}
           items={customers.items}
           total={customers.total}
           sort={sort}
@@ -857,11 +1089,11 @@ export function Dashboard() {
           <h1 ref={setHeadingRef} tabIndex={-1}>
             Модель риска<span className="heading-period">.</span>
           </h1>
-          <p>Веса сигналов объяснимой эвристики. Изменения сохраняются автоматически и сразу пересчитывают все страницы.</p>
+          <p>Веса сигналов объяснимой эвристики. Сначала посмотрите what-if эффект без сохранения — затем примените, и сервер пересчитает всех клиентов.</p>
         </div>
         <div className="heading-side">
           <span className="date-label">{todayLabel()}</span>
-          <span className={`saved-status saved-${saveStatus}`} role="status" aria-live="polite">
+          <span className={`saved-status saved-${weightsDirty && saveStatus === "synced" ? "dirty" : saveStatus}`} role="status" aria-live="polite">
             <motion.i
               aria-hidden="true"
               animate={
@@ -873,10 +1105,12 @@ export function Dashboard() {
             />
             <span>
               {saveStatus === "saving"
-                ? "Сохраняем…"
+                ? "Применяем…"
                 : saveStatus === "error"
-                  ? "Не сохранено"
-                  : "Синхронизировано"}
+                  ? "Не применено"
+                  : weightsDirty
+                    ? "Сценарий не применён"
+                    : "Синхронизировано"}
             </span>
           </span>
         </div>
@@ -897,13 +1131,14 @@ export function Dashboard() {
             <span className="eyebrow">Сигналы и веса</span>
             <h2>Как рассчитывается риск</h2>
             <p>
-              Измените вклад сигнала — оценки, порядок клиентов и выручка под риском
-              пересчитаются и сохранятся автоматически.
+              Ползунки меняют только локальный сценарий. Панель what-if ниже мгновенно
+              показывает, кто сменит уровень и как изменится выручка под риском, — до
+              любого сохранения.
             </p>
           </div>
         </div>
         {settings ? (
-          <WeightControls settings={settings} onWeightChange={handleWeightChange} />
+          <WeightControls settings={weightDraft ? { ...settings, weights: weightDraft } : settings} onWeightChange={handleWeightChange} />
         ) : (
           <div className="weight-skeletons" aria-hidden="true">
             {[0, 1, 2, 3, 4, 5].map((index) => (
@@ -915,6 +1150,20 @@ export function Dashboard() {
           </div>
         )}
       </motion.section>
+
+      {settings && simulation && (
+        <WhatIfPanel
+          sim={simulation}
+          currentCounts={landscapeCounts}
+          currentLoss={landscapeLoss}
+          customersLoaded={landscapeCustomers.length}
+          dirty={weightsDirty}
+          saving={saveStatus === "saving"}
+          onSave={() => void applyWeights()}
+          onReset={resetDraft}
+          onOpenCustomer={openCustomer}
+        />
+      )}
       {pageFooter}
     </>
   );
