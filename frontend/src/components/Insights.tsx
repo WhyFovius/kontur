@@ -1,8 +1,8 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { motion } from "framer-motion";
 import type { Customer, Summary } from "../types";
 import { integer, money } from "../format";
-import { emphasizedTween, fadeRise, springSnappy } from "../motion";
+import { emphasizedTween, fadeRise, springEmphasized, springSnappy } from "../motion";
 import { AnimatedNumber } from "./AnimatedNumber";
 
 /* ---------------- Saved-revenue calculator ---------------- */
@@ -109,10 +109,33 @@ export function DataQuality({
     return { loaded, ratedShare, noServices, noServicesShare, missingExpiry, missingExpiryShare, failed, score };
   }, [customers, summary]);
 
-  const radius = 30;
-  const circumference = 2 * Math.PI * radius;
-  const filled = (stats.score / 100) * circumference;
   const tone = stats.score >= 85 ? "low" : stats.score >= 60 ? "medium" : "high";
+
+  /* Semicircle tick gauge: 41 ticks light up in a cascade up to the score. */
+  const [lit, setLit] = useState(false);
+  useEffect(() => {
+    const id = window.setTimeout(() => setLit(true), 120);
+    return () => window.clearTimeout(id);
+  }, []);
+  const ticks = useMemo(() => {
+    const n = 41;
+    const cx = 80;
+    const cy = 86;
+    return Array.from({ length: n }, (_, i) => {
+      const f = i / (n - 1);
+      const a = Math.PI * (1 - f);
+      const rOuter = 76;
+      const rInner = i % 5 === 0 ? 60 : 65;
+      return {
+        i,
+        x1: cx + rInner * Math.cos(a),
+        y1: cy - rInner * Math.sin(a),
+        x2: cx + rOuter * Math.cos(a),
+        y2: cy - rOuter * Math.sin(a),
+        on: lit && f <= stats.score / 100,
+      };
+    });
+  }, [lit, stats.score]);
 
   const row = (label: string, value: string, good: boolean) => (
     <li className="quality-row">
@@ -138,20 +161,25 @@ export function DataQuality({
         </div>
       </div>
       <div className="quality-head">
-        <div className={`quality-ring quality-ring-${tone}`} role="img" aria-label={`Индекс качества данных ${stats.score} из 100`}>
-          <svg viewBox="0 0 76 76" aria-hidden="true">
-            <circle className="quality-ring-track" cx="38" cy="38" r={radius} />
-            <motion.circle
-              className="quality-ring-fill"
-              cx="38"
-              cy="38"
-              r={radius}
-              initial={false}
-              animate={{ strokeDasharray: `${filled} ${circumference - filled}` }}
-              transition={emphasizedTween}
-            />
+        <div
+          className={`quality-gauge quality-gauge-${tone}`}
+          role="img"
+          aria-label={`Индекс качества данных ${stats.score} из 100`}
+        >
+          <svg viewBox="0 0 160 94" aria-hidden="true">
+            {ticks.map((t) => (
+              <line
+                key={t.i}
+                x1={t.x1}
+                y1={t.y1}
+                x2={t.x2}
+                y2={t.y2}
+                className={`gauge-tick${t.on ? " is-on" : ""}`}
+                style={{ transitionDelay: `${t.i * 14}ms` }}
+              />
+            ))}
           </svg>
-          <span aria-hidden="true">
+          <span className="quality-gauge-value" aria-hidden="true">
             <AnimatedNumber value={stats.score} format={integer} />
           </span>
         </div>
@@ -200,24 +228,25 @@ export function ScoreHistory({ points }: { points: HistoryPoint[] }) {
   const last = sorted[sorted.length - 1];
   const delta = first && last ? last.loss - first.loss : 0;
 
-  const path = useMemo(() => {
-    if (sorted.length < 2) return { line: "", area: "" };
-    const width = 280;
-    const height = 92;
-    const pad = 8;
-    const losses = sorted.map((point) => point.loss);
-    const min = Math.min(...losses);
-    const max = Math.max(...losses);
-    const span = Math.max(max - min, 1);
-    const coords = sorted.map((point, index) => {
-      const x = pad + (index / (sorted.length - 1)) * (width - pad * 2);
-      const y = height - pad - ((point.loss - min) / span) * (height - pad * 2 - 8) - 4;
-      return [Math.round(x * 10) / 10, Math.round(y * 10) / 10] as const;
-    });
-    const line = coords.map(([x, y], index) => `${index ? "L" : "M"} ${x} ${y}`).join(" ");
-    const area = `${line} L ${coords[coords.length - 1][0]} ${height} L ${coords[0][0]} ${height} Z`;
-    return { line, area };
-  }, [sorted]);
+  /* One bar per observation-to-observation change (Web3-bento PnL-strip
+     pattern): red up = more revenue at risk, green down = less. */
+  const changes = useMemo(
+    () =>
+      sorted.slice(1).map((point, i) => ({
+        t: point.t,
+        change: point.loss - sorted[i].loss,
+        loss: point.loss,
+      })),
+    [sorted],
+  );
+  const maxAbs = Math.max(1, ...changes.map((c) => Math.abs(c.change)));
+  const [hover, setHover] = useState<number | null>(null);
+  const dayLabel = (t: number) =>
+    new Date(t).toLocaleDateString("ru-RU", { day: "numeric", month: "short" });
+  const changeText = (change: number) =>
+    change === 0
+      ? "без изменений"
+      : `${change > 0 ? "+" : "−"}${money(Math.abs(change))}`;
 
   return (
     <motion.section
@@ -240,38 +269,58 @@ export function ScoreHistory({ points }: { points: HistoryPoint[] }) {
         )}
       </div>
 
-      {sorted.length < 2 ? (
+      {changes.length === 0 ? (
         <div className="history-empty">
-          <strong>
-            {last ? money(last.loss) : "—"}
-          </strong>
+          <strong>{last ? money(last.loss) : "—"}</strong>
           <span>
-            Первая точка записана. График появится, когда снимок или веса изменят оценку —
-            история копится локально в этом браузере при каждом значимом обновлении.
+            Первая точка записана. Полоса изменений появится, когда снимок или веса изменят
+            оценку, — история копится локально в этом браузере при каждом значимом
+            обновлении.
           </span>
         </div>
       ) : (
         <>
-          <svg
-            className="history-chart"
-            viewBox="0 0 280 92"
-            role="img"
-            aria-label={`Выручка под риском изменилась с ${money(first.loss)} до ${money(last.loss)} за ${sorted.length} точек наблюдения.`}
-            preserveAspectRatio="none"
+          <div
+            className="history-bars"
+            role="group"
+            aria-label={`Изменения выручки под риском между наблюдениями: с ${money(first.loss)} до ${money(last.loss)}.`}
+            onPointerLeave={() => setHover(null)}
           >
-            <defs>
-              <linearGradient id="historyGradient" x1="0" y1="0" x2="0" y2="1">
-                <stop offset="0%" className="chart-gradient-start" />
-                <stop offset="100%" className="chart-gradient-end" />
-              </linearGradient>
-            </defs>
-            <motion.path className="history-area" initial={false} animate={{ d: path.area }} transition={emphasizedTween} />
-            <motion.path className="history-line" initial={false} animate={{ d: path.line }} transition={emphasizedTween} />
-          </svg>
-          <div className="history-range" aria-hidden="true">
-            <span>{new Date(first.t).toLocaleDateString("ru-RU")}</span>
-            <span>{money(last.loss)} сейчас</span>
-            <span>{new Date(last.t).toLocaleDateString("ru-RU")}</span>
+            {changes.map((c, i) => {
+              const h = 14 + (Math.abs(c.change) / maxAbs) * 86;
+              const cls = c.change > 0 ? "is-up" : c.change < 0 ? "is-down" : "is-flat";
+              return (
+                <motion.button
+                  key={`${c.t}-${i}`}
+                  type="button"
+                  className={`history-bar ${cls}`}
+                  initial={{ height: "8%" }}
+                  animate={{ height: `${h}%` }}
+                  transition={{ ...springEmphasized, delay: i * 0.02 }}
+                  style={{
+                    opacity:
+                      hover === null
+                        ? 0.45 + (Math.abs(c.change) / maxAbs) * 0.55
+                        : hover === i
+                          ? 1
+                          : 0.25,
+                  }}
+                  onPointerEnter={() => setHover(i)}
+                  onFocus={() => setHover(i)}
+                  onBlur={() => setHover(null)}
+                  aria-label={`${dayLabel(c.t)}: ${changeText(c.change)}, стало ${money(c.loss)}`}
+                />
+              );
+            })}
+          </div>
+          <div className="history-bars-meta">
+            <span>{dayLabel(first.t)}</span>
+            <span className="history-readout" aria-live="polite">
+              {hover !== null
+                ? `${dayLabel(changes[hover].t)} · ${changeText(changes[hover].change)} → ${money(changes[hover].loss)}`
+                : "Изменение между наблюдениями"}
+            </span>
+            <span>сейчас · {money(last.loss)}</span>
           </div>
         </>
       )}
