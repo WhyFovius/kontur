@@ -15,6 +15,7 @@ import "./styles/liquid-glass-overrides.css";
 import "./styles/liquid-glass-refraction.css";
 import "./styles/liquid-glass-tuning.css";
 import "./styles/login.css";
+import "./styles/liquid-glass-live.css";
 
 // FastAPI keeps the server-side auth gate: "/" is only served to a signed-in
 // session and "/login" only to anonymous visitors, so routing by pathname
