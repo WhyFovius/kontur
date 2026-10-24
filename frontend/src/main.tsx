@@ -1,6 +1,7 @@
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 import { MotionConfig } from "framer-motion";
+import "./material";
 import { Dashboard } from "./Dashboard";
 import { Login } from "./Login";
 import "./styles/tokens.css";

@@ -179,3 +179,18 @@
   .login-form-panel { padding-top: 36px; }
   .login-form { padding: 28px 22px 24px; }
 }
+
+/* Material Web submit */
+.login-submit-md {
+  width: 100%;
+  --md-filled-button-container-height: 54px;
+  --md-filled-button-label-text-size: 16px;
+  --md-filled-button-label-text-weight: 700;
+  --md-filled-button-container-shape: 18px;
+}
+.login-progress {
+  --md-circular-progress-size: 20px;
+  --md-circular-progress-active-indicator-width: 12%;
+  --md-circular-progress-active-indicator-color: var(--md-on-primary);
+  width: 20px; height: 20px;
+}

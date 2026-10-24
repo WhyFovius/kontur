@@ -38,45 +38,28 @@ export function ThemeToggle({
 }) {
   const isDark = theme === "dark";
   return (
-    <motion.button
-      type="button"
-      className={`icon-button theme-toggle ${className}`}
+    // Google's own toggle icon-button: the sun/moon swap is the
+    // component's built-in selected-slot mechanism, no custom
+    // animation code left to glitch.
+    <md-icon-button
+      toggle
+      selected={isDark}
+      class={`theme-toggle-md ${className}`}
       onClick={onToggle}
-      aria-label={isDark ? "Переключить на светлую тему" : "Переключить на тёмную тему"}
-      aria-pressed={isDark}
+      aria-label={
+        isDark
+          ? "Тёмная тема включена. Переключить на светлую тему"
+          : "Светлая тема. Переключить на тёмную тему"
+      }
       title={isDark ? "Переключить на светлую тему" : "Переключить на тёмную тему"}
-      whileTap={{ scale: 0.88 }}
-      transition={springSnappy}
     >
-      {/* Stacked layers instead of AnimatePresence: nothing ever gets
-          "popped" out of flow, so the icon physically cannot fly away. */}
-      <span className="theme-icon-stack" aria-hidden="true">
-        <motion.span
-          className="theme-icon-layer"
-          initial={false}
-          animate={
-            isDark
-              ? { opacity: 1, rotate: 0, scale: 1 }
-              : { opacity: 0, rotate: 55, scale: 0.4 }
-          }
-          transition={springSnappy}
-        >
-          <IconSun />
-        </motion.span>
-        <motion.span
-          className="theme-icon-layer"
-          initial={false}
-          animate={
-            isDark
-              ? { opacity: 0, rotate: -55, scale: 0.4 }
-              : { opacity: 1, rotate: 0, scale: 1 }
-          }
-          transition={springSnappy}
-        >
-          <IconMoon />
-        </motion.span>
+      <span className="md-icon-wrap">
+        <IconSun />
       </span>
-    </motion.button>
+      <span slot="selected" className="md-icon-wrap">
+        <IconMoon />
+      </span>
+    </md-icon-button>
   );
 }
 
@@ -200,17 +183,11 @@ export function Sidebar({
             <strong>{username || "Аналитик"}</strong>
             <span>Команда маркетинга</span>
           </div>
-          <motion.button
-            type="button"
-            className="icon-button"
-            onClick={onLogout}
-            aria-label="Выйти из аккаунта"
-            title="Выйти"
-            whileTap={{ scale: 0.9 }}
-            transition={springSnappy}
-          >
-            <IconLogout />
-          </motion.button>
+          <md-icon-button onClick={onLogout} aria-label="Выйти из аккаунта" title="Выйти">
+            <span className="md-icon-wrap">
+              <IconLogout />
+            </span>
+          </md-icon-button>
         </div>
       </div>
     </aside>
@@ -338,9 +315,8 @@ export function Topbar({
         </span>
         <span className="updated-time">{lastUpdated}</span>
         <ThemeToggle theme={theme} onToggle={onToggleTheme} />
-        <motion.button
-          type="button"
-          className={`button button-primary upload-button upload-${uploadPhase}`}
+        <md-filled-button
+          class={`upload-button upload-${uploadPhase}`}
           onClick={onUploadClick}
           disabled={uploading}
           aria-busy={uploading}
@@ -352,11 +328,7 @@ export function Topbar({
                 : "Загрузить снимок"
           }
           aria-describedby="snapshotHelp"
-          whileTap={{ scale: 0.97 }}
-          transition={springSnappy}
         >
-          {/* Same stacked-layer pattern as the theme toggle: a hidden
-              sizer pins the width, labels crossfade in place. */}
           <span className="upload-label-wrap upload-label-stack" aria-hidden="true">
             <span className="upload-label-sizer">
               <IconUpload /> Загрузить снимок
@@ -398,18 +370,17 @@ export function Topbar({
               <IconCheck /> Снимок обновлён
             </motion.span>
           </span>
-        </motion.button>
-        <motion.button
-          type="button"
-          className="icon-button mobile-logout"
+        </md-filled-button>
+        <md-icon-button
+          class="mobile-logout"
           onClick={onLogout}
           aria-label="Выйти из аккаунта"
           title="Выйти"
-          whileTap={{ scale: 0.9 }}
-          transition={springSnappy}
         >
-          <IconLogout />
-        </motion.button>
+          <span className="md-icon-wrap">
+            <IconLogout />
+          </span>
+        </md-icon-button>
         <input
           ref={fileInputRef}
           type="file"
@@ -460,14 +431,11 @@ export function Snackbar({
         >
           <span>{toast.message}</span>
           {toast.persistent && (
-            <button
-              type="button"
-              className="snackbar-close"
-              onClick={onClose}
-              aria-label="Закрыть сообщение"
-            >
-              <IconClose />
-            </button>
+            <md-icon-button class="snackbar-close-md" onClick={onClose} aria-label="Закрыть сообщение">
+              <span className="md-icon-wrap">
+                <IconClose />
+              </span>
+            </md-icon-button>
           )}
         </motion.div>
       )}

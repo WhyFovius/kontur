@@ -19,7 +19,7 @@ import { RiskDonut } from "./components/RiskDonut";
 import { ForecastChart } from "./components/ForecastChart";
 import { KpiCards, KpiSkeletons } from "./components/KpiCards";
 import { WeightControls } from "./components/WeightControls";
-import { RiskLandscape } from "./components/RiskLandscape";
+import { RiskBars } from "./components/RiskBars";
 import { WhatIfPanel } from "./components/WhatIf";
 import {
   DataQuality,
@@ -126,15 +126,12 @@ function TodayQueue({
           <h2>Очередь на сегодня</h2>
           <p>Высокий риск по убыванию score. Клик откроет карточку на странице «Клиенты».</p>
         </div>
-        <motion.button
-          type="button"
-          className="button button-tonal button-small"
-          onClick={onShowAll}
-          whileTap={{ scale: 0.96 }}
-          transition={springSnappy}
-        >
-          Все с высоким риском{total ? ` · ${integer(total)}` : ""} <IconArrowRight />
-        </motion.button>
+        <md-filled-tonal-button trailingIcon onClick={onShowAll}>
+          Все с высоким риском{total ? ` · ${integer(total)}` : ""}
+          <span slot="icon" className="md-icon-wrap">
+            <IconArrowRight />
+          </span>
+        </md-filled-tonal-button>
       </div>
 
       {loading && items.length === 0 ? (
@@ -878,29 +875,19 @@ export function Dashboard() {
           </h1>
           <p>
             Контур превращает снимок аккаунтов в очередь действий: кто уходит, почему
-            именно сейчас и сколько выручки это стоит — с объяснением каждого балла,
-            3D-картой риска и what-if моделью.
+            именно сейчас и сколько выручки это стоит — с объяснением каждого балла и
+            what-if моделью.
           </p>
           <div className="hero-actions">
-            <motion.button
-              type="button"
-              className="button button-primary"
-              onClick={showHighRisk}
-              whileTap={{ scale: 0.96 }}
-              transition={springSnappy}
-            >
-              Открыть Risk Inbox{summary ? ` · ${integer(summary.highRisk)}` : ""}{" "}
-              <IconArrowRight />
-            </motion.button>
-            <motion.button
-              type="button"
-              className="button button-tonal"
-              onClick={() => goToPage("model")}
-              whileTap={{ scale: 0.96 }}
-              transition={springSnappy}
-            >
+            <md-filled-button trailingIcon onClick={showHighRisk}>
+              Открыть Risk Inbox{summary ? ` · ${integer(summary.highRisk)}` : ""}
+              <span slot="icon" className="md-icon-wrap">
+                <IconArrowRight />
+              </span>
+            </md-filled-button>
+            <md-filled-tonal-button onClick={() => goToPage("model")}>
               What-if: покрутить веса
-            </motion.button>
+            </md-filled-tonal-button>
             {summary && (
               <span className="hero-loss-chip">
                 Под угрозой на 90 дней:{" "}
@@ -923,7 +910,7 @@ export function Dashboard() {
         <KpiSkeletons />
       )}
 
-      <RiskLandscape
+      <RiskBars
         customers={landscapeCustomers}
         onOpen={(customer) => openCustomer(customer.id, customer.riskLevel)}
       />
@@ -1118,6 +1105,7 @@ export function Dashboard() {
 
       {summary ? <ModelImpact summary={summary} /> : <KpiSkeletons />}
 
+      <div className={`model-grid${settings && simulation ? "" : " model-grid-solo"}`}>
       <motion.section
         className="panel model-panel"
         variants={fadeRise}
@@ -1131,7 +1119,7 @@ export function Dashboard() {
             <span className="eyebrow">Сигналы и веса</span>
             <h2>Как рассчитывается риск</h2>
             <p>
-              Ползунки меняют только локальный сценарий. Панель what-if ниже мгновенно
+              Ползунки меняют только локальный сценарий. Карточка сценария справа мгновенно
               показывает, кто сменит уровень и как изменится выручка под риском, — до
               любого сохранения.
             </p>
@@ -1164,6 +1152,7 @@ export function Dashboard() {
           onOpenCustomer={openCustomer}
         />
       )}
+      </div>
       {pageFooter}
     </>
   );

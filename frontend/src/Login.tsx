@@ -1,4 +1,4 @@
-import { useEffect, useState, type FormEvent } from "react";
+import { useEffect, useRef, useState, type FormEvent } from "react";
 import { AnimatePresence, motion, useAnimationControls } from "framer-motion";
 import { useTheme } from "./theme";
 import { springEmphasized, springSnappy } from "./motion";
@@ -22,6 +22,7 @@ export function Login() {
   const [error, setError] = useState<string | null>(null);
   const [invalid, setInvalid] = useState(false);
   const [phase, setPhase] = useState<Phase>("idle");
+  const submitLock = useRef(false);
   const shake = useAnimationControls();
 
   useEffect(() => {
@@ -53,13 +54,14 @@ export function Login() {
 
   const onSubmit = async (event: FormEvent) => {
     event.preventDefault();
-    if (phase !== "idle") return;
+    if (phase !== "idle" || submitLock.current) return;
     if (!username.trim() || !password) {
       fail("Введите логин и пароль.", true);
       return;
     }
     setError(null);
     setInvalid(false);
+    submitLock.current = true;
     setPhase("loading");
     try {
       const response = await fetch("/api/v1/auth/login", {
@@ -70,6 +72,7 @@ export function Login() {
       });
       const payload = (await response.json().catch(() => ({}))) as { detail?: string };
       if (!response.ok) {
+        submitLock.current = false;
         setPhase("idle");
         fail(payload.detail || "Не удалось войти. Проверьте логин и пароль.", true);
         document.getElementById("password")?.focus();
@@ -78,6 +81,7 @@ export function Login() {
       setPhase("success");
       window.setTimeout(() => window.location.replace("/"), 520);
     } catch {
+      submitLock.current = false;
       setPhase("idle");
       fail("Не удалось связаться с сервером. Проверьте подключение и попробуйте ещё раз.", false);
     }
@@ -281,40 +285,40 @@ export function Login() {
             )}
           </AnimatePresence>
 
-          <motion.button
-            layout
+          {/* Material Web filled button. The onClick requestSubmit is a
+              belt-and-suspenders fallback in case form association is
+              unavailable; submitLock in onSubmit prevents any double
+              submission if both paths fire. */}
+          <md-filled-button
+            class="login-submit-md"
             type="submit"
-            className={`login-submit login-submit-${phase}`}
+            trailingIcon={phase === "idle"}
             disabled={phase !== "idle"}
-            aria-busy={phase === "loading"}
-            whileTap={{ scale: 0.98 }}
-            transition={springSnappy}
+            onClick={(event: React.MouseEvent<HTMLElement>) => {
+              event.currentTarget.closest("form")?.requestSubmit();
+            }}
           >
-            <AnimatePresence mode="wait" initial={false}>
-              <motion.span
-                key={phase}
-                className="login-submit-label"
-                initial={{ opacity: 0, y: 10, scale: 0.95 }}
-                animate={{ opacity: 1, y: 0, scale: 1 }}
-                exit={{ opacity: 0, y: -10, scale: 0.95 }}
-                transition={springSnappy}
-              >
-                {phase === "success" ? (
-                  <>
-                    <IconCheck /> Добро пожаловать
-                  </>
-                ) : phase === "loading" ? (
-                  <>
-                    <span className="button-spinner" aria-hidden="true" /> Проверяем данные…
-                  </>
-                ) : (
-                  <>
-                    Войти в панель <IconArrowUpRight />
-                  </>
-                )}
-              </motion.span>
-            </AnimatePresence>
-          </motion.button>
+            {phase === "success" ? (
+              <>
+                <span slot="icon" className="md-icon-wrap">
+                  <IconCheck />
+                </span>
+                Добро пожаловать
+              </>
+            ) : phase === "loading" ? (
+              <>
+                <md-circular-progress indeterminate class="login-progress" />
+                Проверяем данные…
+              </>
+            ) : (
+              <>
+                Войти в панель
+                <span slot="icon" className="md-icon-wrap">
+                  <IconArrowUpRight />
+                </span>
+              </>
+            )}
+          </md-filled-button>
 
           <p className="login-footnote">
             <IconLock /> Сессия хранится в защищённой cookie

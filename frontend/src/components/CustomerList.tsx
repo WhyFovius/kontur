@@ -1,4 +1,4 @@
-import { forwardRef, memo, useEffect, useState } from "react";
+import { forwardRef, memo, useEffect, useRef, useState } from "react";
 import { AnimatePresence, motion } from "framer-motion";
 import type { Customer, RiskLevel, SortKey, SortOrder } from "../types";
 import {
@@ -344,23 +344,19 @@ function CustomerDetail({
           <span className="detail-next-eyebrow">Следующий шаг</span>
           <p>{nextStep(customer)}</p>
           <div className="detail-actions">
-            <motion.button
-              type="button"
-              className="button button-tonal button-small"
-              onClick={copyEmail}
-              whileTap={{ scale: 0.96 }}
-              transition={springSnappy}
-            >
-              {copied ? <IconCheck /> : <IconCopy />}
+            <md-filled-tonal-button onClick={copyEmail}>
+              <span slot="icon" className="md-icon-wrap">
+                {copied ? <IconCheck /> : <IconCopy />}
+              </span>
               {copied ? "Скопировано" : "Скопировать email"}
-            </motion.button>
+            </md-filled-tonal-button>
             {customer.email.includes("@") && (
-              <a
-                className="button button-outline button-small"
-                href={`mailto:${customer.email}`}
-              >
-                <IconMail /> Написать письмо
-              </a>
+              <md-outlined-button href={`mailto:${customer.email}`}>
+                <span slot="icon" className="md-icon-wrap">
+                  <IconMail />
+                </span>
+                Написать письмо
+              </md-outlined-button>
             )}
           </div>
         </div>
@@ -594,6 +590,48 @@ export interface SavedView {
   order: SortOrder;
 }
 
+function ViewChip({
+  view,
+  active,
+  onApply,
+  onDelete,
+}: {
+  view: SavedView;
+  active: boolean;
+  onApply: (view: SavedView) => void;
+  onDelete: (id: string) => void;
+}) {
+  const chipRef = useRef<HTMLElement | null>(null);
+  const removing = useRef(false);
+
+  useEffect(() => {
+    const el = chipRef.current;
+    if (!el) return;
+    const handler = () => {
+      removing.current = true;
+      onDelete(view.id);
+    };
+    el.addEventListener("remove", handler);
+    return () => el.removeEventListener("remove", handler);
+  }, [onDelete, view.id]);
+
+  return (
+    <md-input-chip
+      ref={chipRef}
+      label={view.name}
+      selected={active}
+      aria-label={`Применить вид «${view.name}»`}
+      onClick={() => {
+        if (removing.current) {
+          removing.current = false;
+          return;
+        }
+        onApply(view);
+      }}
+    />
+  );
+}
+
 function SavedViewsBar({
   views,
   activeViewId,
@@ -627,29 +665,17 @@ function SavedViewsBar({
             <motion.span
               key={view.id}
               layout
-              className={`saved-view-chip${view.id === activeViewId ? " is-active" : ""}`}
               initial={{ opacity: 0, scale: 0.85 }}
               animate={{ opacity: 1, scale: 1 }}
               exit={{ opacity: 0, scale: 0.85 }}
               transition={springSnappy}
             >
-              <button
-                type="button"
-                className="saved-view-apply"
-                onClick={() => onApply(view)}
-                aria-pressed={view.id === activeViewId}
-                title={`Применить вид «${view.name}»`}
-              >
-                {view.name}
-              </button>
-              <button
-                type="button"
-                className="saved-view-delete"
-                onClick={() => onDelete(view.id)}
-                aria-label={`Удалить вид «${view.name}»`}
-              >
-                ×
-              </button>
+              <ViewChip
+                view={view}
+                active={view.id === activeViewId}
+                onApply={onApply}
+                onDelete={onDelete}
+              />
             </motion.span>
           ))}
         </AnimatePresence>
@@ -681,35 +707,23 @@ function SavedViewsBar({
               maxLength={40}
               autoFocus
             />
-            <button
-              type="submit"
-              className="button button-primary button-small"
-              disabled={!name.trim()}
-            >
+            <md-filled-button disabled={!name.trim()} onClick={submit}>
               Сохранить
-            </button>
-            <button
-              type="button"
-              className="button button-ghost button-small"
-              onClick={() => setFormOpen(false)}
-            >
-              Отмена
-            </button>
+            </md-filled-button>
+            <md-text-button onClick={() => setFormOpen(false)}>Отмена</md-text-button>
           </motion.form>
         ) : (
-          <motion.button
+          <motion.span
             key="open"
-            type="button"
-            className="button button-tonal button-small"
-            onClick={() => setFormOpen(true)}
             initial={{ opacity: 0, x: -8 }}
             animate={{ opacity: 1, x: 0 }}
             exit={{ opacity: 0, x: 8 }}
-            whileTap={{ scale: 0.96 }}
             transition={springSnappy}
           >
-            + Сохранить текущий вид
-          </motion.button>
+            <md-filled-tonal-button onClick={() => setFormOpen(true)}>
+              + Сохранить текущий вид
+            </md-filled-tonal-button>
+          </motion.span>
         )}
       </AnimatePresence>
     </div>
@@ -861,15 +875,7 @@ export function CustomerList(props: CustomerListProps) {
         <div className="table-state">
           <strong>Не удалось загрузить данные</strong>
           <span>{loadError}</span>
-          <motion.button
-            type="button"
-            className="button button-tonal button-small"
-            onClick={onRetry}
-            whileTap={{ scale: 0.96 }}
-            transition={springSnappy}
-          >
-            Повторить
-          </motion.button>
+          <md-filled-tonal-button onClick={onRetry}>Повторить</md-filled-tonal-button>
         </div>
       ) : items.length === 0 ? (
         <motion.div
@@ -906,31 +912,27 @@ export function CustomerList(props: CustomerListProps) {
           {risk ? ` · фильтр: ${RISK_LABELS[risk].toLowerCase()} риск` : ""}
         </span>
         <div className="table-pagination" aria-label="Навигация по страницам клиентов">
-          <motion.button
-            type="button"
-            className="page-button"
+          <md-icon-button
             onClick={onPrevious}
             disabled={offset === 0}
             aria-label="Предыдущая страница"
-            whileTap={{ scale: 0.9 }}
-            transition={springSnappy}
           >
-            <IconArrowLeft />
-          </motion.button>
+            <span className="md-icon-wrap">
+              <IconArrowLeft />
+            </span>
+          </md-icon-button>
           <span role="status" aria-live="polite">
             {integer(first)}–{integer(last)} из {integer(total)}
           </span>
-          <motion.button
-            type="button"
-            className="page-button"
+          <md-icon-button
             onClick={onNext}
             disabled={offset + items.length >= total}
             aria-label="Следующая страница"
-            whileTap={{ scale: 0.9 }}
-            transition={springSnappy}
           >
-            <IconArrowRight />
-          </motion.button>
+            <span className="md-icon-wrap">
+              <IconArrowRight />
+            </span>
+          </md-icon-button>
         </div>
         <a
           href="/api/v1/docs"
