@@ -3,6 +3,7 @@ import { AnimatePresence, motion, useAnimationControls } from "framer-motion";
 import { useTheme } from "./theme";
 import { springEmphasized, springSnappy } from "./motion";
 import { ThemeToggle } from "./components/Chrome";
+import { AezaLogo, BrandPattern, MascotImage } from "./components/Brand";
 import { IconArrowUpRight, IconCheck, IconLock } from "./icons";
 
 type Phase = "idle" | "loading" | "success";
@@ -26,7 +27,7 @@ export function Login() {
   const shake = useAnimationControls();
 
   useEffect(() => {
-    document.title = "Вход · Контур аналитики";
+    document.title = "Вход · Aéza Контур";
     if (new URLSearchParams(window.location.search).has("expired")) {
       setError("Сессия завершилась. Войдите снова.");
     }
@@ -39,7 +40,7 @@ export function Login() {
       transition: springEmphasized,
     });
     return () => {
-      document.title = "Контур — удержание клиентов";
+      document.title = "Aéza Контур — удержание клиентов";
     };
   }, [shake]);
 
@@ -92,6 +93,7 @@ export function Login() {
       <ThemeToggle theme={theme} onToggle={toggleTheme} className="login-theme-toggle" />
 
       <section className="login-hero-panel" aria-labelledby="brandTitle">
+        <BrandPattern className="login-pattern" />
         <motion.div
           className="login-orb login-orb-one"
           aria-hidden="true"
@@ -105,14 +107,13 @@ export function Login() {
           transition={{ repeat: Infinity, duration: 13, ease: "easeInOut", delay: 1.2 }}
         />
 
-        <a className="brand-lockup brand-lockup-invert" href="/login" aria-label="Контур аналитики">
-          <span className="brand-mark" aria-hidden="true">
-            <span style={{ transform: "scaleY(.45)" }} />
-            <span style={{ transform: "scaleY(.8)" }} />
-            <span />
+        <a className="brand-lockup login-brand-lockup" href="/login" aria-label="Aéza Контур">
+          <span className="brand-logo-full">
+            <AezaLogo />
           </span>
-          <span className="brand-name">
-            контур <span>/ удержание</span>
+          <span className="brand-product">
+            <strong>Контур</strong>
+            <small>удержание клиентов</small>
           </span>
         </a>
 
@@ -184,6 +185,15 @@ export function Login() {
             <span className="mock-line" />
             <span className="mock-line mock-line-short" />
           </motion.div>
+          <motion.div
+            className="login-mascot-card"
+            animate={{ y: [0, -8, 0], rotate: [0, -0.5, 0] }}
+            transition={{ repeat: Infinity, duration: 7.5, ease: "easeInOut", delay: 0.4 }}
+          >
+            <BrandPattern />
+            <MascotImage pose="business" />
+            <span>Aéza-тян</span>
+          </motion.div>
           <motion.span
             className="mock-chip mock-chip-one"
             animate={{ y: [0, -9, 0], rotate: [0, -2, 0] }}
@@ -221,7 +231,7 @@ export function Login() {
         >
           <div className="form-heading">
             <span className="eyebrow">Рабочее пространство</span>
-            <h2 id="loginTitle">Войти в Контур</h2>
+            <h2 id="loginTitle">Войти в Aéza Контур</h2>
             <p>Используйте учётные данные администратора.</p>
           </div>
 
@@ -325,7 +335,7 @@ export function Login() {
           </p>
         </motion.form>
         <footer className="login-footer">
-          <span>Контур · Аналитика удержания</span>
+          <span>Aéza · Контур удержания</span>
           <span>Доступ по приглашению</span>
         </footer>
       </section>

@@ -9,38 +9,47 @@ import type { Transition, Variants } from "framer-motion";
  */
 export const springEmphasized: Transition = {
   type: "spring",
-  stiffness: 320,
-  damping: 32,
-  mass: 1,
+  stiffness: 380,
+  damping: 34,
+  mass: 0.95,
 };
 
 export const springStandard: Transition = {
   type: "spring",
-  stiffness: 420,
-  damping: 36,
+  stiffness: 460,
+  damping: 38,
   mass: 0.9,
 };
 
 export const springSnappy: Transition = {
   type: "spring",
-  stiffness: 560,
-  damping: 34,
-  mass: 0.8,
+  stiffness: 650,
+  damping: 38,
+  mass: 0.75,
 };
 
 export const springGentle: Transition = {
   type: "spring",
-  stiffness: 170,
-  damping: 26,
+  stiffness: 220,
+  damping: 29,
   mass: 1,
 };
 
 /** Drag-select thumbs: tight spring that chases the pointer without lag. */
 export const springFollow: Transition = {
   type: "spring",
-  stiffness: 520,
-  damping: 38,
-  mass: 0.9,
+  stiffness: 720,
+  damping: 44,
+  mass: 0.85,
+};
+
+/** Expressive shape morphs use a short overshooting tween; the animated
+ * value is a radius/path interpolation on small surfaces, while position
+ * and page choreography stay on composited transforms. */
+export const shapeMorphTween: Transition = {
+  type: "tween",
+  duration: 0.45,
+  ease: [0.34, 1.45, 0.42, 1],
 };
 
 /** M3 emphasized easing as a tween fallback (path morphs, counters). */
@@ -107,13 +116,13 @@ export const pressable = {
 export const pageVariants: Variants = {
   enter: (direction: number) => ({
     opacity: 0,
-    x: direction >= 0 ? 38 : -38,
+    x: direction >= 0 ? 28 : -28,
     scale: 0.995,
   }),
   center: { opacity: 1, x: 0, scale: 1, transition: springEmphasized },
   exit: (direction: number) => ({
     opacity: 0,
-    x: direction >= 0 ? -26 : 26,
+    x: direction >= 0 ? -20 : 20,
     scale: 0.995,
     transition: { duration: 0.18, ease: [0.3, 0, 1, 1] },
   }),

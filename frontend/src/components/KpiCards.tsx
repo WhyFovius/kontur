@@ -4,6 +4,7 @@ import { integer, money } from "../format";
 import { springEmphasized, springSnappy, staggerChild } from "../motion";
 import { AnimatedNumber } from "./AnimatedNumber";
 import { IconArrowUpRight, IconCalendar, IconShield, IconUsers, IconWallet } from "../icons";
+import { BrandPattern } from "./Brand";
 
 interface KpiCardsProps {
   summary: Summary;
@@ -11,7 +12,7 @@ interface KpiCardsProps {
 }
 
 /**
- * Bento KPI row. Revenue-at-risk is the commercial hero: deep-green
+ * Bento KPI row. Revenue-at-risk is the commercial hero: Aéza black/navy
  * expressive surface, spring-counted money, direct CTA into the filtered
  * work queue. Secondary cards stay quiet so the money reads first.
  */
@@ -35,6 +36,7 @@ export function KpiCards({ summary, onShowHighRisk }: KpiCardsProps) {
         transition={springSnappy}
       >
         <div className="metric-hero-glow" aria-hidden="true" />
+        <BrandPattern className="metric-hero-pattern" />
         <div className="metric-top">
           <span>Выручка под риском</span>
           <span className="metric-symbol metric-symbol-hero" aria-hidden="true">

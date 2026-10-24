@@ -3,6 +3,7 @@ import { AnimatePresence, motion } from "framer-motion";
 import type { Theme } from "../theme";
 import { springSnappy, springEmphasized, springFollow } from "../motion";
 import { useDragSelect } from "./useDragSelect";
+import { AezaLogo, BrandPattern } from "./Brand";
 import {
   IconCheck,
   IconChevron,
@@ -96,26 +97,16 @@ export function Sidebar({
 
   return (
     <aside className="sidebar">
-      <a href="#overview" className="brand-lockup" aria-label="Контур — к обзору">
-        <span className="brand-mark" aria-hidden="true">
-          <motion.span
-            initial={{ scaleY: 0 }}
-            animate={{ scaleY: 0.45 }}
-            transition={{ ...springEmphasized, delay: 0.1 }}
-          />
-          <motion.span
-            initial={{ scaleY: 0 }}
-            animate={{ scaleY: 0.8 }}
-            transition={{ ...springEmphasized, delay: 0.18 }}
-          />
-          <motion.span
-            initial={{ scaleY: 0 }}
-            animate={{ scaleY: 1 }}
-            transition={{ ...springEmphasized, delay: 0.26 }}
-          />
+      <a href="#overview" className="brand-lockup" aria-label="Aéza Контур — к обзору">
+        <span className="brand-logo-full">
+          <AezaLogo />
         </span>
-        <span className="brand-name">
-          контур<span> / удержание</span>
+        <span className="brand-logo-compact">
+          <AezaLogo compact />
+        </span>
+        <span className="brand-product">
+          <strong>Контур</strong>
+          <small>удержание клиентов</small>
         </span>
       </a>
 
@@ -156,9 +147,15 @@ export function Sidebar({
               title={collapsed ? item.label : undefined}
               onClick={(event) => drag.handleItemClick(item.id, event)}
             >
-              <span className="nav-icon" aria-hidden="true">
+              <motion.span
+                className="nav-icon"
+                initial={false}
+                animate={{ scale: active ? 1 : 0.94, rotate: active ? 0 : -3 }}
+                transition={springSnappy}
+                aria-hidden="true"
+              >
                 <Icon />
-              </span>
+              </motion.span>
               <span className="nav-label">{item.label}</span>
               {item.id === "customers" && <span className="nav-count">{customerCount}</span>}
             </a>
@@ -189,6 +186,7 @@ export function Sidebar({
           <span className="sidebar-toggle-label">{collapsed ? "Развернуть" : "Свернуть"}</span>
         </motion.button>
         <div className="sidebar-note">
+          <BrandPattern className="sidebar-pattern" />
           <span
             className={`note-signal${connectionError ? " is-error" : ""}`}
             aria-hidden="true"
@@ -274,9 +272,14 @@ export function MobileNav({
             aria-current={activeSection === item.id ? "page" : undefined}
             onClick={(event) => drag.handleItemClick(item.id, event)}
           >
-            <span className="mobile-nav-icon-wrap">
+            <motion.span
+              className="mobile-nav-icon-wrap"
+              initial={false}
+              animate={{ scale: active ? 1 : 0.92, rotate: active ? 0 : -3 }}
+              transition={springSnappy}
+            >
               <Icon />
-            </span>
+            </motion.span>
             <span>{item.label}</span>
           </a>
         );
@@ -342,38 +345,43 @@ export function Topbar({
   const uploading = uploadPhase === "loading";
   return (
     <header className="topbar">
-      <div className="breadcrumbs">
-        <span>Контур</span>
-        <span className="crumb-separator" aria-hidden="true">
-          /
-        </span>
-        <AnimatePresence mode="popLayout" initial={false}>
-          <motion.strong
-            key={sectionLabel}
-            initial={{ opacity: 0, y: 6 }}
-            animate={{ opacity: 1, y: 0 }}
-            exit={{ opacity: 0, y: -6 }}
-            transition={springSnappy}
-          >
-            {sectionLabel}
-          </motion.strong>
-        </AnimatePresence>
-      </div>
+      <nav className="breadcrumbs" aria-label="Хлебные крошки">
+        <ol>
+          <li className="crumb-brand">Aéza</li>
+          <li className="crumb-separator" aria-hidden="true">/</li>
+          <li>Контур</li>
+          <li className="crumb-separator" aria-hidden="true">/</li>
+          <li aria-current="page">
+            <motion.strong
+              key={sectionLabel}
+              initial={{ opacity: 0, y: 7, scale: 0.98 }}
+              animate={{ opacity: 1, y: 0, scale: 1 }}
+              transition={springSnappy}
+            >
+              {sectionLabel}
+            </motion.strong>
+          </li>
+        </ol>
+      </nav>
       <div className="topbar-actions">
         <span
-          className={`live-indicator${connectionError ? " is-error" : ""}`}
+          className={`live-indicator sync-capsule${connectionError ? " is-error" : ""}`}
           role="status"
         >
-          <motion.i
-            key={lastUpdatedAt ?? "init"}
-            initial={{ scale: 1.6 }}
-            animate={{ scale: 1 }}
-            transition={springSnappy}
-            aria-hidden="true"
-          />
-          <span>{connectionError ? "Нет связи с сервером" : "Синхронизация активна"}</span>
+          <span className="sync-dot" aria-hidden="true">
+            <motion.i
+              key={lastUpdatedAt ?? "init"}
+              initial={{ scale: 1.7 }}
+              animate={{ scale: 1 }}
+              transition={springSnappy}
+            />
+          </span>
+          <span className="sync-label">
+            {connectionError ? "Нет связи с сервером" : "Синхронизация активна"}
+          </span>
+          <span className="sync-divider" aria-hidden="true" />
+          <UpdatedAgo at={lastUpdatedAt} />
         </span>
-        <UpdatedAgo at={lastUpdatedAt} />
         <ThemeToggle theme={theme} onToggle={onToggleTheme} />
         <md-filled-button
           class={`upload-button upload-${uploadPhase}`}
