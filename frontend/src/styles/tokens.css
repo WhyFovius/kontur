@@ -165,9 +165,10 @@
      Aéza «keycap corner» on interactive containers (buttons, chips, nav)
      echoing the keyboard-key logo. Panels/cards/rows always use the
      uniform scale; cookie/clover/keycap percentages are reserved for
-     small SQUARE tiles (icon tiles, loader, avatars), arch only for
-     portrait media frames. Never put percentage/arch shapes on wide
-     text containers — the radii eat the text safe area. */
+     small SQUARE tiles (icon tiles, loader, avatars) and for the
+     portrait mascot media frames (cookie blob, morphs on hover).
+     Never put percentage shapes on wide text containers — the radii
+     eat the text safe area. */
   --shape-xs: 4px;
   --shape-sm: 8px;
   --shape-md: 12px;
@@ -186,6 +187,10 @@
   --shape-arch: 999px 999px 24px 24px;
   --shape-cookie: 58% 42% 46% 54% / 44% 54% 46% 56%;
   --shape-cookie-alt: 42% 58% 55% 45% / 56% 45% 55% 44%;
+  /* Portrait variant: same wavy blob language, moderated vertical radii
+     so tall mascot frames keep head/feet/badge inside the curve. */
+  --shape-cookie-portrait: 58% 42% 46% 54% / 26% 30% 28% 32%;
+  --shape-cookie-portrait-alt: 42% 58% 55% 45% / 30% 26% 32% 28%;
   --shape-clover: 46% 54% 48% 52% / 54% 46% 52% 48%;
   /* Retired expressive aliases kept for legacy selectors; all resolve to
      the uniform scale so older rules render standardized geometry. */

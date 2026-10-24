@@ -55,7 +55,6 @@ export function ExpressiveSlider({
   const percent = max === min ? 0 : ((safeValue - min) / (max - min)) * 100;
   const reduceMotion = useReducedMotion();
   const [dragging, setDragging] = useState(false);
-  const [focused, setFocused] = useState(false);
 
   const target = useMotionValue(percent);
   const displayPercent = useSpring(target, {
@@ -81,7 +80,6 @@ export function ExpressiveSlider({
     <div
       className="expressive-slider"
       data-dragging={dragging || undefined}
-      data-focused={focused || undefined}
       data-value-edge={edge}
     >
       <div className="expressive-slider-rail" aria-hidden="true">
@@ -134,11 +132,8 @@ export function ExpressiveSlider({
         }}
         onPointerUp={() => setDragging(false)}
         onPointerCancel={() => setDragging(false)}
-        onBlur={() => {
-          setDragging(false);
-          setFocused(false);
-        }}
-        onFocus={() => setFocused(true)}
+        onLostPointerCapture={() => setDragging(false)}
+        onBlur={() => setDragging(false)}
       />
     </div>
   );

@@ -45,7 +45,7 @@
   font-weight: 800; letter-spacing: -.035em;
 }
 .line-mask { display: block; overflow: hidden; padding-bottom: .08em; margin-bottom: -.08em; }
-.line-mask > span { display: block; will-change: transform; }
+.line-mask > span { display: block; }
 .login-accent-line {
   background: linear-gradient(92deg, var(--brand-orange), #4cc6f1);
   -webkit-background-clip: text; background-clip: text; color: transparent;
@@ -243,10 +243,10 @@
 .login-mascot-card {
   position: relative; height: 288px; overflow: hidden; isolation: isolate;
   display: grid; place-items: end center;
-  border: 1px solid rgba(0, 0, 0, .42); border-radius: var(--shape-arch);
+  border: 1px solid rgba(0, 0, 0, .42); border-radius: var(--shape-cookie-portrait);
   background: linear-gradient(160deg, #000000 0%, var(--brand-navy) 86%);
   color: #ffffff; box-shadow: var(--elevation-3);
-  will-change: transform;
+  transition: border-radius .6s var(--motion-shape);
 }
 .login-mascot-card .brand-pattern { position: absolute; z-index: -1; right: -34px; bottom: -42px; width: 270px; height: 124px; opacity: .5; }
 .login-mascot-card .mascot-image { width: auto; height: 276px; max-width: 178px; object-fit: contain; object-position: bottom center; }
@@ -300,4 +300,13 @@
 .login-hero-copy h1 { overflow-wrap: anywhere; }
 @media (max-width: 920px) {
   .login-hero-panel { border-radius: 0 0 var(--shape-xxl) var(--shape-lg); }
+}
+
+
+/* Feedback round 3: cookie portrait frame matches the dashboard stage;
+   the badge moves inward so the blob's top-left curve never clips it. */
+.login-mascot-card:hover { border-radius: var(--shape-cookie-portrait-alt); }
+.login-mascot-card > span { top: 26px; left: 26px; }
+@media (prefers-reduced-motion: reduce) {
+  .login-mascot-card { transition: none; }
 }

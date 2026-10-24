@@ -94,8 +94,9 @@ export function MascotStage({
           </md-filled-button>
         ) : null}
       </div>
-      {/* Portrait arch media frame: the expressive shape wraps the
-          mascot only, never the text. The idle float is a CSS
+      {/* Portrait cookie-blob media frame (M3 Expressive): the
+          expressive shape wraps the mascot only, never the text, and
+          morphs to cookie-alt on stage hover. The idle float is a CSS
           transform animation (compositor), not a JS rAF loop. */}
       <div className="mascot-stage-figure" aria-hidden="true">
         <BrandPattern className="mascot-stage-pattern" />
