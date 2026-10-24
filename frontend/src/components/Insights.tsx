@@ -31,17 +31,18 @@ export function RevenueCalculator({
           {money(loss)} под риском · <strong>{rate}%</strong>
         </span>
       </div>
-      <input
+      <md-slider
         id={`calc-${label}`}
-        className="weight-slider"
-        type="range"
+        class="calc-md-slider"
         min={0}
         max={100}
         step={5}
         value={rate}
-        aria-valuetext={`${rate} процентов`}
-        style={{ "--fill": `${rate}%` } as React.CSSProperties}
-        onChange={(event) => setRate(Number(event.target.value))}
+        labeled
+        aria-label={label}
+        onInput={(event: React.SyntheticEvent<HTMLElement>) =>
+          setRate(Number((event.target as unknown as { value: number }).value))
+        }
       />
     </div>
   );
@@ -177,15 +178,9 @@ export function DataQuality({
         </p>
       )}
       {summary.unratedCount > 0 && (
-        <motion.button
-          type="button"
-          className="button button-tonal button-small quality-action"
-          onClick={onShowUnrated}
-          whileTap={{ scale: 0.96 }}
-          transition={springSnappy}
-        >
+        <md-filled-tonal-button class="quality-action" onClick={onShowUnrated}>
           Показать клиентов без оценки · {integer(summary.unratedCount)}
-        </motion.button>
+        </md-filled-tonal-button>
       )}
     </motion.section>
   );

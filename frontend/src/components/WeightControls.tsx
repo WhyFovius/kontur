@@ -56,19 +56,21 @@ function WeightItem({
         </motion.span>
       </div>
       <div className="weight-inputs">
-        <input
-          className="weight-slider"
-          id={`weight-${featureKey}`}
-          type="range"
+        <md-slider
+          class="weight-md-slider"
           min={0}
           max={100}
           step={1}
           value={value}
+          labeled
           data-weight={featureKey}
-          aria-labelledby={`weight-label-${featureKey}`}
-          aria-valuetext={`${value} из 100`}
-          style={{ "--fill": `${value}%` } as React.CSSProperties}
-          onChange={(event) => onWeightChange(featureKey, Number(event.target.value))}
+          aria-label={`Вес сигнала: ${label}`}
+          onInput={(event: React.SyntheticEvent<HTMLElement>) =>
+            onWeightChange(
+              featureKey,
+              Number((event.target as unknown as { value: number }).value),
+            )
+          }
         />
         <input
           className="weight-number"

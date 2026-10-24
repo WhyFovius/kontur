@@ -2,7 +2,7 @@ import { AnimatePresence, motion } from "framer-motion";
 import type { RiskLevel } from "../types";
 import { RISK_LABELS } from "../types";
 import { integer, money } from "../format";
-import { fadeRise, springSnappy } from "../motion";
+import { fadeRise, springEmphasized, springSnappy } from "../motion";
 import { AnimatedNumber } from "./AnimatedNumber";
 import type { LevelCounts, SimulationResult } from "../simulate";
 
@@ -20,11 +20,59 @@ interface WhatIfPanelProps {
 
 const LEVELS: Array<Exclude<RiskLevel, "unrated">> = ["high", "medium", "low"];
 
-function deltaLabel(delta: number): string {
-  if (delta === 0) return "±0";
-  return `${delta > 0 ? "+" : "−"}${integer(Math.abs(delta))}`;
+function DistBar({
+  label,
+  counts,
+  compare,
+}: {
+  label: string;
+  counts: LevelCounts;
+  compare?: LevelCounts;
+}) {
+  const total = Math.max(1, counts.high + counts.medium + counts.low);
+  return (
+    <div className="dist-row">
+      <span className="dist-label">{label}</span>
+      <div
+        className="dist-bar"
+        role="img"
+        aria-label={`${label}: высокий риск ${counts.high}, средний ${counts.medium}, низкий ${counts.low}`}
+      >
+        {LEVELS.map((level) => (
+          <motion.span
+            key={level}
+            className={`dist-seg dist-seg-${level}`}
+            initial={false}
+            animate={{ width: `${(counts[level] / total) * 100}%` }}
+            transition={springEmphasized}
+          />
+        ))}
+      </div>
+      <span className="dist-counts">
+        {LEVELS.map((level) => {
+          const delta = compare ? counts[level] - compare[level] : 0;
+          return (
+            <span key={level} className="dist-count">
+              <span className={`risk-dot risk-dot-${level}`} aria-hidden="true" />
+              {integer(counts[level])}
+              {compare && delta !== 0 && (
+                <strong className={delta > 0 ? "delta-bad" : "delta-good"}>
+                  {delta > 0 ? `+${delta}` : `−${Math.abs(delta)}`}
+                </strong>
+              )}
+            </span>
+          );
+        })}
+      </span>
+    </div>
+  );
 }
 
+/**
+ * Compact sticky scenario card that lives next to the weight sliders:
+ * distribution now vs. scenario, revenue-at-risk delta and the biggest
+ * movers — one glance, no scrolling, nothing is saved until "Применить".
+ */
 export function WhatIfPanel({
   sim,
   currentCounts,
@@ -39,49 +87,46 @@ export function WhatIfPanel({
   const lossDelta = sim.estimatedLoss - currentLoss;
 
   return (
-    <motion.section
+    <motion.aside
       className="panel whatif-panel"
       variants={fadeRise}
       custom={0.08}
       initial="hidden"
       animate="show"
-      aria-label="What-if симулятор коэффициентов"
+      aria-label="What-if сценарий весов"
     >
-      <div className="panel-heading">
-        <div className="section-heading-copy">
-          <span className="eyebrow">What-if · до сохранения</span>
-          <h2>Что изменится при этих весах</h2>
-          <p>
-            Двигайте ползунки выше — пересчёт идёт мгновенно в браузере и ничего не сохраняет.
-            Сервер применит веса только по кнопке ниже.
-          </p>
+      <div className="panel-heading whatif-heading">
+        <div>
+          <span className="eyebrow">Сценарий · what-if</span>
+          <h2>Эффект новых весов</h2>
         </div>
-        <span className="panel-meta">Основано на {integer(customersLoaded)} загруженных клиентах</span>
+        <span className="panel-meta">по {integer(customersLoaded)} клиентам</span>
+      </div>
+      <p className="whatif-intro">
+        Ползунки слева меняют только этот сценарий. Сервер применит веса и пересчитает всех
+        клиентов лишь по кнопке «Применить».
+      </p>
+
+      <div className="dist-compare">
+        <DistBar label="Сейчас" counts={currentCounts} />
+        <DistBar label="Сценарий" counts={sim.counts} compare={currentCounts} />
       </div>
 
-      <div className="whatif-deltas">
-        {LEVELS.map((level) => {
-          const delta = sim.counts[level] - currentCounts[level];
-          return (
-            <div key={level} className={`whatif-chip whatif-${level}`}>
-              <span className={`risk-dot risk-dot-${level}`} aria-hidden="true" />
-              <span className="whatif-chip-label">{RISK_LABELS[level]}</span>
-              <span className="whatif-chip-values">
-                {integer(currentCounts[level])} → {integer(sim.counts[level])}
-              </span>
-              <strong className={delta === 0 ? "" : delta > 0 ? "delta-bad" : "delta-good"}>
-                {deltaLabel(delta)}
-              </strong>
-            </div>
-          );
-        })}
-        <div className="whatif-chip whatif-loss">
-          <span className="whatif-chip-label">Выручка под риском</span>
-          <AnimatedNumber value={sim.estimatedLoss} format={money} className="whatif-loss-value" />
-          <strong className={lossDelta === 0 ? "" : lossDelta > 0 ? "delta-bad" : "delta-good"}>
-            {lossDelta === 0 ? "без изменений" : `${lossDelta > 0 ? "+" : "−"}${money(Math.abs(lossDelta))}`}
-          </strong>
-        </div>
+      <div className="whatif-lossbox">
+        <span className="whatif-loss-label">Выручка под риском · 90 дней</span>
+        <span className="whatif-loss-values">
+          <span className="whatif-loss-now">{money(currentLoss)}</span>
+          <span aria-hidden="true">→</span>
+          <AnimatedNumber value={sim.estimatedLoss} format={money} className="whatif-loss-next" />
+        </span>
+        <span
+          className={`whatif-delta-pill ${lossDelta > 0 ? "is-bad" : lossDelta < 0 ? "is-good" : ""}`}
+          aria-live="polite"
+        >
+          {lossDelta === 0
+            ? "без изменений"
+            : `${lossDelta > 0 ? "+" : "−"}${money(Math.abs(lossDelta))} к текущим потерям`}
+        </span>
       </div>
 
       <div className="whatif-movers">
@@ -91,7 +136,7 @@ export function WhatIfPanel({
             : "Никто не сменит уровень"}
         </h3>
         <AnimatePresence initial={false}>
-          {sim.movers.slice(0, 6).map((mover) => (
+          {sim.movers.slice(0, 5).map((mover) => (
             <motion.button
               key={mover.id}
               type="button"
@@ -101,7 +146,7 @@ export function WhatIfPanel({
               exit={{ opacity: 0, y: -4 }}
               transition={springSnappy}
               onClick={() => onOpenCustomer(mover.id, mover.fromLevel)}
-              aria-label={`Открыть клиента ${mover.email}: после сохранения перейдёт из уровня «${RISK_LABELS[mover.fromLevel]}» в «${RISK_LABELS[mover.toLevel]}»`}
+              aria-label={`Открыть клиента ${mover.email}: после применения перейдёт из уровня «${RISK_LABELS[mover.fromLevel]}» в «${RISK_LABELS[mover.toLevel]}»`}
             >
               <span className="mover-email">{mover.email}</span>
               <span className="mover-path">
@@ -117,36 +162,22 @@ export function WhatIfPanel({
             </motion.button>
           ))}
         </AnimatePresence>
-        {sim.movers.length > 6 && (
-          <p className="panel-hint">…и ещё {integer(sim.movers.length - 6)} клиентов с меньшим эффектом.</p>
+        {sim.movers.length > 5 && (
+          <p className="panel-hint">…и ещё {integer(sim.movers.length - 5)} с меньшим эффектом.</p>
         )}
       </div>
 
       <div className="whatif-actions">
-        <motion.button
-          type="button"
-          className="button button-primary"
-          disabled={!dirty || saving}
-          onClick={onSave}
-          whileTap={{ scale: 0.96 }}
-          transition={springSnappy}
-        >
-          {saving ? "Сохраняем…" : "Применить веса"}
-        </motion.button>
-        <motion.button
-          type="button"
-          className="button button-ghost"
-          disabled={!dirty || saving}
-          onClick={onReset}
-          whileTap={{ scale: 0.96 }}
-          transition={springSnappy}
-        >
-          Вернуть сохранённые
-        </motion.button>
+        <md-filled-button disabled={!dirty || saving} onClick={onSave}>
+          {saving ? "Применяем…" : "Применить веса"}
+        </md-filled-button>
+        <md-text-button disabled={!dirty || saving} onClick={onReset}>
+          Сбросить
+        </md-text-button>
         <span className="whatif-note" aria-live="polite">
-          {dirty ? "Есть несохранённый сценарий" : "Сценарий совпадает с сохранёнными весами"}
+          {dirty ? "Сценарий не применён" : "Совпадает с сохранёнными"}
         </span>
       </div>
-    </motion.section>
+    </motion.aside>
   );
 }

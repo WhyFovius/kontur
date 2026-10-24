@@ -38,30 +38,28 @@ export function ThemeToggle({
 }) {
   const isDark = theme === "dark";
   return (
-    <motion.button
-      type="button"
-      className={`icon-button theme-toggle ${className}`}
+    // Google's own toggle icon-button: the sun/moon swap is the
+    // component's built-in selected-slot mechanism, no custom
+    // animation code left to glitch.
+    <md-icon-button
+      toggle
+      selected={isDark}
+      class={`theme-toggle-md ${className}`}
       onClick={onToggle}
-      aria-label={isDark ? "Переключить на светлую тему" : "Переключить на тёмную тему"}
-      aria-pressed={isDark}
+      aria-label={
+        isDark
+          ? "Тёмная тема включена. Переключить на светлую тему"
+          : "Светлая тема. Переключить на тёмную тему"
+      }
       title={isDark ? "Переключить на светлую тему" : "Переключить на тёмную тему"}
-      whileTap={{ scale: 0.88 }}
-      transition={springSnappy}
     >
-      <AnimatePresence mode="popLayout" initial={false}>
-        <motion.span
-          key={theme}
-          className="theme-icon-swap"
-          initial={{ opacity: 0, rotate: -35, scale: 0.65 }}
-          animate={{ opacity: 1, rotate: 0, scale: 1 }}
-          exit={{ opacity: 0, rotate: 35, scale: 0.65 }}
-          transition={springSnappy}
-          aria-hidden="true"
-        >
-          {isDark ? <IconSun /> : <IconMoon />}
-        </motion.span>
-      </AnimatePresence>
-    </motion.button>
+      <span className="md-icon-wrap">
+        <IconSun />
+      </span>
+      <span slot="selected" className="md-icon-wrap">
+        <IconMoon />
+      </span>
+    </md-icon-button>
   );
 }
 
@@ -185,17 +183,11 @@ export function Sidebar({
             <strong>{username || "Аналитик"}</strong>
             <span>Команда маркетинга</span>
           </div>
-          <motion.button
-            type="button"
-            className="icon-button"
-            onClick={onLogout}
-            aria-label="Выйти из аккаунта"
-            title="Выйти"
-            whileTap={{ scale: 0.9 }}
-            transition={springSnappy}
-          >
-            <IconLogout />
-          </motion.button>
+          <md-icon-button onClick={onLogout} aria-label="Выйти из аккаунта" title="Выйти">
+            <span className="md-icon-wrap">
+              <IconLogout />
+            </span>
+          </md-icon-button>
         </div>
       </div>
     </aside>
@@ -323,52 +315,72 @@ export function Topbar({
         </span>
         <span className="updated-time">{lastUpdated}</span>
         <ThemeToggle theme={theme} onToggle={onToggleTheme} />
-        <motion.button
-          type="button"
-          className={`button button-primary upload-button upload-${uploadPhase}`}
+        <md-filled-button
+          class={`upload-button upload-${uploadPhase}`}
           onClick={onUploadClick}
           disabled={uploading}
           aria-busy={uploading}
+          aria-label={
+            uploadPhase === "success"
+              ? "Снимок обновлён. Загрузить ещё один снимок"
+              : uploading
+                ? "Идёт загрузка снимка"
+                : "Загрузить снимок"
+          }
           aria-describedby="snapshotHelp"
-          whileTap={{ scale: 0.97 }}
-          transition={springSnappy}
         >
-          <AnimatePresence mode="popLayout" initial={false}>
+          <span className="upload-label-wrap upload-label-stack" aria-hidden="true">
+            <span className="upload-label-sizer">
+              <IconUpload /> Загрузить снимок
+            </span>
             <motion.span
-              key={uploadPhase}
-              className="upload-label-wrap"
-              initial={{ opacity: 0, y: 8, scale: 0.95 }}
-              animate={{ opacity: 1, y: 0, scale: 1 }}
-              exit={{ opacity: 0, y: -8, scale: 0.95 }}
+              className="upload-label-layer"
+              initial={false}
+              animate={
+                uploadPhase === "idle"
+                  ? { opacity: 1, y: 0, scale: 1 }
+                  : { opacity: 0, y: 6, scale: 0.92 }
+              }
               transition={springSnappy}
             >
-              {uploadPhase === "success" ? (
-                <>
-                  <IconCheck /> Снимок обновлён
-                </>
-              ) : uploading ? (
-                <>
-                  <span className="button-spinner" aria-hidden="true" /> Загружаем…
-                </>
-              ) : (
-                <>
-                  <IconUpload /> Загрузить снимок
-                </>
-              )}
+              <IconUpload /> Загрузить снимок
             </motion.span>
-          </AnimatePresence>
-        </motion.button>
-        <motion.button
-          type="button"
-          className="icon-button mobile-logout"
+            <motion.span
+              className="upload-label-layer"
+              initial={false}
+              animate={
+                uploading
+                  ? { opacity: 1, y: 0, scale: 1 }
+                  : { opacity: 0, y: 6, scale: 0.92 }
+              }
+              transition={springSnappy}
+            >
+              <span className="button-spinner" aria-hidden="true" /> Загружаем…
+            </motion.span>
+            <motion.span
+              className="upload-label-layer"
+              initial={false}
+              animate={
+                uploadPhase === "success"
+                  ? { opacity: 1, y: 0, scale: 1 }
+                  : { opacity: 0, y: 6, scale: 0.92 }
+              }
+              transition={springSnappy}
+            >
+              <IconCheck /> Снимок обновлён
+            </motion.span>
+          </span>
+        </md-filled-button>
+        <md-icon-button
+          class="mobile-logout"
           onClick={onLogout}
           aria-label="Выйти из аккаунта"
           title="Выйти"
-          whileTap={{ scale: 0.9 }}
-          transition={springSnappy}
         >
-          <IconLogout />
-        </motion.button>
+          <span className="md-icon-wrap">
+            <IconLogout />
+          </span>
+        </md-icon-button>
         <input
           ref={fileInputRef}
           type="file"
@@ -419,14 +431,11 @@ export function Snackbar({
         >
           <span>{toast.message}</span>
           {toast.persistent && (
-            <button
-              type="button"
-              className="snackbar-close"
-              onClick={onClose}
-              aria-label="Закрыть сообщение"
-            >
-              <IconClose />
-            </button>
+            <md-icon-button class="snackbar-close-md" onClick={onClose} aria-label="Закрыть сообщение">
+              <span className="md-icon-wrap">
+                <IconClose />
+              </span>
+            </md-icon-button>
           )}
         </motion.div>
       )}
