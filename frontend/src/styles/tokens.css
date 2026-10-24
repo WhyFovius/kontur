@@ -394,9 +394,6 @@
   --md-filter-chip-container-shape-start-end: 10px;
   --md-filter-chip-container-shape-end-end: 10px;
   --md-filter-chip-container-shape-end-start: 6px;
-  --md-slider-handle-shape: var(--shape-full);
-  --md-slider-active-track-shape: var(--shape-full);
-  --md-slider-inactive-track-shape: var(--shape-full);
 
   --md-ref-typeface-brand: "Exo 2", "Inter", system-ui, -apple-system, "Segoe UI", sans-serif;
   --md-ref-typeface-plain: "Inter", "Exo 2", system-ui, -apple-system, "Segoe UI", sans-serif;

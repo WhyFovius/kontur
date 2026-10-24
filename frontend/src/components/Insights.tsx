@@ -4,6 +4,7 @@ import type { Customer, Summary } from "../types";
 import { integer, money } from "../format";
 import { emphasizedTween, fadeRise, springEmphasized, springSnappy } from "../motion";
 import { AnimatedNumber } from "./AnimatedNumber";
+import { ExpressiveSlider } from "./ExpressiveSlider";
 
 /* ---------------- Saved-revenue calculator ---------------- */
 
@@ -19,6 +20,7 @@ export function RevenueCalculator({
   const saved = Math.round((lossHigh * highRate) / 100 + (lossMedium * mediumRate) / 100);
 
   const sliderRow = (
+    id: string,
     label: string,
     loss: number,
     rate: number,
@@ -26,23 +28,20 @@ export function RevenueCalculator({
   ) => (
     <div className="calc-row">
       <div className="calc-row-head">
-        <label htmlFor={`calc-${label}`}>{label}</label>
+        <label htmlFor={id}>{label}</label>
         <span className="calc-row-meta">
           {money(loss)} под риском · <strong>{rate}%</strong>
         </span>
       </div>
-      <md-slider
-        id={`calc-${label}`}
-        class="calc-md-slider"
+      <ExpressiveSlider
+        id={id}
         min={0}
         max={100}
         step={5}
         value={rate}
-        labeled
-        aria-label={label}
-        onInput={(event: React.SyntheticEvent<HTMLElement>) =>
-          setRate(Number((event.target as unknown as { value: number }).value))
-        }
+        label={label}
+        formatValue={(next) => `${next}%`}
+        onChange={setRate}
       />
     </div>
   );
@@ -62,8 +61,8 @@ export function RevenueCalculator({
           <h2>Сколько выручки спасёт команда</h2>
         </div>
       </div>
-      {sliderRow("Удастся удержать из высокого риска", lossHigh, highRate, setHighRate)}
-      {sliderRow("Удастся удержать из среднего риска", lossMedium, mediumRate, setMediumRate)}
+      {sliderRow("calc-high", "Удастся удержать из высокого риска", lossHigh, highRate, setHighRate)}
+      {sliderRow("calc-medium", "Удастся удержать из среднего риска", lossMedium, mediumRate, setMediumRate)}
       <div className="calc-result">
         <span>Спасённая выручка по сценарию</span>
         <AnimatedNumber value={saved} format={money} className="calc-result-value" />

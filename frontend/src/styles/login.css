@@ -284,3 +284,20 @@
   .login-mascot-card .mascot-image { height: 168px; max-width: 104px; }
   .mock-chip-one { right: 1%; font-size: 11px; }
 }
+
+
+/* ----- M3 Foundations + Expressive pass: standardized login geometry --- */
+.login-shell { overflow-x: clip; }
+.login-theme-toggle {
+  top: max(18px, env(safe-area-inset-top));
+  right: max(18px, env(safe-area-inset-right));
+}
+.login-hero-panel { border-radius: 0 var(--shape-xxl) var(--shape-xxl) var(--shape-lg); }
+.login-form { border-radius: var(--shape-xl); }
+.mock-card { border-radius: var(--shape-xl); }
+.login-mascot-card .mascot-image { will-change: transform; backface-visibility: hidden; }
+.login-hero-copy, .login-form, .login-visual { min-width: 0; }
+.login-hero-copy h1 { overflow-wrap: anywhere; }
+@media (max-width: 920px) {
+  .login-hero-panel { border-radius: 0 0 var(--shape-xxl) var(--shape-lg); }
+}

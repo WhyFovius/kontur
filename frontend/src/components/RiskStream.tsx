@@ -1,8 +1,8 @@
-import { useMemo, useState } from "react";
-import { motion } from "framer-motion";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { motion, useMotionValue, useReducedMotion, useSpring } from "framer-motion";
 import type { Customer, Summary } from "../types";
 import { integer, money } from "../format";
-import { fadeRise, springEmphasized } from "../motion";
+import { fadeRise, springFollow } from "../motion";
 import { DotNumber } from "./DotNumber";
 
 type Level = "high" | "medium" | "low";
@@ -31,8 +31,14 @@ const H = 250;
 const MID = H / 2;
 const PAD_X = 36;
 const MAX_HALF = 96;
+const FLOW_PERIOD_MS = 2800;
+const REVEAL_MS = 850;
 
 type Pt = readonly [number, number];
+
+function clamp(value: number, min: number, max: number) {
+  return Math.min(max, Math.max(min, value));
+}
 
 function smoothPath(p: Pt[], move = true): string {
   if (!p.length) return "";
@@ -55,11 +61,19 @@ function smoothPath(p: Pt[], move = true): string {
 }
 
 /**
- * Symmetric streamgraph (the Net-Worth stream pattern from the shared
- * finance bento) fed with real data: revenue at risk per risk level
- * across service-expiry horizons, computed from the top-N customers the
- * dashboard already loads. The big total is the portfolio summary
+ * Symmetric streamgraph fed with real data: revenue at risk per risk
+ * level across service-expiry horizons, computed from the top-N customers
+ * the dashboard already loads. The big total is the portfolio summary
  * figure, rendered as a counting dot-matrix number.
+ *
+ * The stream is alive without becoming a React render loop: a single
+ * requestAnimationFrame writes the three path `d` attributes directly,
+ * with a wall-clock phase (identical timing at 60 Hz and 360 Hz). The
+ * travelling swell uses the same factor for every cumulative layer, so
+ * bands can never cross. Motion pauses offscreen, in hidden tabs and
+ * under prefers-reduced-motion. Hover is continuous: the guide chases the
+ * pointer on a spring motion value and the readout interpolates between
+ * bucket centres, exactly like the drawn curve between those centres.
  */
 export function RiskStream({
   summary,
@@ -68,7 +82,12 @@ export function RiskStream({
   summary: Summary;
   customers: Customer[];
 }) {
-  const [hover, setHover] = useState<number | null>(null);
+  const [hoverT, setHoverT] = useState<number | null>(null);
+  const reduceMotion = useReducedMotion();
+  const svgRef = useRef<SVGSVGElement | null>(null);
+  const pathRefs = useRef<Array<SVGPathElement | null>>([]);
+  const pendingHover = useRef<number | null>(null);
+  const hoverFrame = useRef<number | null>(null);
 
   const { matrix, totals, noDate, hasData, maxIdx } = useMemo(() => {
     const m: Record<Level, number>[] = BUCKETS.map(() => ({ high: 0, medium: 0, low: 0 }));
@@ -95,7 +114,6 @@ export function RiskStream({
     };
   }, [customers]);
 
-  const active = hover ?? maxIdx;
   const x = (i: number) => PAD_X + (i / (BUCKETS.length - 1)) * (W - PAD_X * 2);
   const maxTotal = Math.max(1, ...totals);
   const k = MAX_HALF / maxTotal;
@@ -106,19 +124,157 @@ export function RiskStream({
       LEVELS.slice(0, li + 1).reduce((sum, l) => sum + row[l.key] * k, 0),
     ),
   );
+  const cumRef = useRef(cum);
+  cumRef.current = cum;
+
   // Virtual zero points just inside both edges: the stream flows in
   // from a tip and out to a tip, symmetric and intentional at both
   // ends, instead of starting mid-air wherever bucket 0 happens to be.
   const xs = [10, ...BUCKETS.map((_, i) => x(i)), W - 10];
-  const band = (c: number[]) => {
+  const band = (c: number[], phase = 0, reveal = 1) => {
     const v = [0, ...c, 0];
+    const geometry = v.map((vv, i) => {
+      const endpoint = i === 0 || i === v.length - 1;
+      const envelope = endpoint ? 0 : Math.sin((i / (v.length - 1)) * Math.PI);
+      // One shared swell factor and centre drift for all layers keeps
+      // the cumulative ordering intact while the wave travels.
+      const factor = 1 + 0.038 * Math.sin(phase - i * 0.72) * envelope;
+      const centre = MID + Math.sin(phase * 0.82 - i * 0.58) * 2.2 * envelope * reveal;
+      return { centre, half: Math.max(0, vv * factor * reveal) };
+    });
     return (
-      smoothPath(v.map((vv, i) => [xs[i], MID - vv] as const)) +
-      smoothPath(v.map((vv, i) => [xs[i], MID + vv] as const).reverse(), false) +
+      smoothPath(geometry.map((g, i) => [xs[i], g.centre - g.half] as const)) +
+      smoothPath(geometry.map((g, i) => [xs[i], g.centre + g.half] as const).reverse(), false) +
       " Z"
     );
   };
-  const flat = band(matrix.map(() => 0));
+  const flat = band(matrix.map(() => 0), 0, 0);
+  const streamKey = useMemo(
+    () => matrix.map((row) => LEVELS.map((l) => row[l.key]).join("/")).join("|"),
+    [matrix],
+  );
+
+  useEffect(() => {
+    if (!hasData) return undefined;
+
+    const draw = (phase: number, reveal: number) => {
+      [2, 1, 0].forEach((li) => {
+        pathRefs.current[li]?.setAttribute("d", band(cumRef.current[li], phase, reveal));
+      });
+    };
+
+    if (reduceMotion) {
+      draw(0, 1);
+      return undefined;
+    }
+
+    let raf = 0;
+    let running = false;
+    let visible = !document.hidden;
+    let inView = true;
+    const started = performance.now();
+
+    const loop = (now: number) => {
+      if (!running) return;
+      const elapsed = now - started;
+      const reveal = 1 - Math.pow(1 - Math.min(1, elapsed / REVEAL_MS), 3);
+      draw((elapsed / FLOW_PERIOD_MS) * Math.PI * 2, reveal);
+      raf = requestAnimationFrame(loop);
+    };
+    const start = () => {
+      if (running || !visible || !inView) return;
+      running = true;
+      raf = requestAnimationFrame(loop);
+    };
+    const stop = () => {
+      running = false;
+      cancelAnimationFrame(raf);
+    };
+    const onVisibility = () => {
+      visible = !document.hidden;
+      if (visible) start();
+      else stop();
+    };
+
+    const observer =
+      typeof IntersectionObserver === "undefined"
+        ? null
+        : new IntersectionObserver(
+            ([entry]) => {
+              inView = entry.isIntersecting;
+              if (inView) start();
+              else stop();
+            },
+            { threshold: 0.05 },
+          );
+    if (observer && svgRef.current) observer.observe(svgRef.current);
+    document.addEventListener("visibilitychange", onVisibility);
+    start();
+
+    return () => {
+      stop();
+      observer?.disconnect();
+      document.removeEventListener("visibilitychange", onVisibility);
+    };
+    // `band` closes over constants and cumRef; streamKey intentionally
+    // restarts the reveal only when the underlying data really changes.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [hasData, reduceMotion, streamKey]);
+
+  useEffect(
+    () => () => {
+      if (hoverFrame.current !== null) cancelAnimationFrame(hoverFrame.current);
+    },
+    [],
+  );
+
+  const guideTarget = useMotionValue(x(maxIdx));
+  const guideX = useSpring(guideTarget, {
+    stiffness: springFollow.stiffness,
+    damping: springFollow.damping,
+    mass: springFollow.mass,
+  });
+
+  useEffect(() => {
+    if (hoverT === null) guideTarget.set(x(maxIdx));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [guideTarget, hoverT, maxIdx]);
+
+  const updateHover = (event: React.PointerEvent<SVGSVGElement>) => {
+    const rect = event.currentTarget.getBoundingClientRect();
+    if (!rect.width) return;
+    const svgX = ((event.clientX - rect.left) / rect.width) * W;
+    const t = clamp(
+      ((svgX - PAD_X) / (W - PAD_X * 2)) * (BUCKETS.length - 1),
+      0,
+      BUCKETS.length - 1,
+    );
+    pendingHover.current = t;
+    if (hoverT === null) guideX.jump(x(t));
+    guideTarget.set(x(t));
+    if (hoverFrame.current !== null) return;
+    hoverFrame.current = requestAnimationFrame(() => {
+      hoverFrame.current = null;
+      if (pendingHover.current !== null) setHoverT(pendingHover.current);
+    });
+  };
+
+  const clearHover = () => {
+    pendingHover.current = null;
+    setHoverT(null);
+  };
+
+  const activeFloat = hoverT ?? maxIdx;
+  const active = clamp(Math.round(activeFloat), 0, BUCKETS.length - 1);
+  const lower = Math.floor(activeFloat);
+  const upper = Math.min(BUCKETS.length - 1, lower + 1);
+  const fraction = upper === lower ? 0 : activeFloat - lower;
+  const interpolate = (values: number[]) =>
+    values[lower] + (values[upper] - values[lower]) * fraction;
+  const activeTotal = interpolate(totals);
+  const activeValues = Object.fromEntries(
+    LEVELS.map((l) => [l.key, interpolate(matrix.map((row) => row[l.key]))]),
+  ) as Record<Level, number>;
 
   return (
     <motion.article
@@ -158,55 +314,45 @@ export function RiskStream({
       {hasData ? (
         <>
           <svg
+            ref={svgRef}
             className="riskstream-svg"
             viewBox={`0 0 ${W} ${H}`}
             role="img"
             aria-label={`Поток выручки под риском: пик на участке «${BUCKETS[maxIdx].label}» — ${money(totals[maxIdx])}.`}
-            onPointerLeave={() => setHover(null)}
+            onPointerEnter={updateHover}
+            onPointerMove={updateHover}
+            onPointerLeave={clearHover}
           >
             <g>
               {[2, 1, 0].map((li) => (
-                <motion.path
+                <path
                   key={LEVELS[li].key}
+                  ref={(el) => {
+                    pathRefs.current[li] = el;
+                  }}
+                  className="riskstream-band"
+                  d={flat}
                   fill={LEVELS[li].color}
                   opacity={li === 2 ? 0.88 : 0.96}
-                  initial={{ d: flat }}
-                  animate={{ d: band(cum[li]) }}
-                  transition={{ ...springEmphasized, delay: 0.1 + (2 - li) * 0.08 }}
                 />
               ))}
             </g>
-            {hover !== null && (
-              <g pointerEvents="none">
+            {hoverT !== null && (
+              <motion.g pointerEvents="none" style={{ x: guideX }}>
                 <line
-                  x1={x(active)}
-                  x2={x(active)}
-                  y1={MID - totals[active] * k - 10}
-                  y2={MID + totals[active] * k + 10}
+                  x1={0}
+                  x2={0}
+                  y1={MID - activeTotal * k - 10}
+                  y2={MID + activeTotal * k + 10}
                   stroke="#ffffff"
                   strokeOpacity="0.75"
                   strokeWidth="1.5"
                   strokeLinecap="round"
                 />
-                <circle cx={x(active)} cy={MID - totals[active] * k} r="3.5" fill="#ffffff" />
-                <circle cx={x(active)} cy={MID + totals[active] * k} r="3.5" fill="#ffffff" />
-              </g>
+                <circle cx={0} cy={MID - activeTotal * k} r="3.5" fill="#ffffff" />
+                <circle cx={0} cy={MID + activeTotal * k} r="3.5" fill="#ffffff" />
+              </motion.g>
             )}
-            {BUCKETS.map((bucket, i) => {
-              const left = i === 0 ? 0 : (x(i - 1) + x(i)) / 2;
-              const right = i === BUCKETS.length - 1 ? W : (x(i) + x(i + 1)) / 2;
-              return (
-                <rect
-                  key={bucket.id}
-                  x={left}
-                  y={0}
-                  width={right - left}
-                  height={H}
-                  fill="transparent"
-                  onPointerEnter={() => setHover(i)}
-                />
-              );
-            })}
           </svg>
 
           <div className="riskstream-readout" aria-live="polite">
@@ -214,11 +360,11 @@ export function RiskStream({
             {LEVELS.map((l) => (
               <span key={l.key} className="riskstream-readout-item">
                 <i style={{ background: l.color }} aria-hidden="true" />
-                {l.label.toLowerCase()}: {money(matrix[active][l.key])}
+                {l.label.toLowerCase()}: {money(Math.round(activeValues[l.key]))}
               </span>
             ))}
             <span>
-              итого: <strong>{money(totals[active])}</strong>
+              итого: <strong>{money(Math.round(activeTotal))}</strong>
             </span>
           </div>
 
