@@ -1082,24 +1082,26 @@ a { color: var(--md-primary); }
 
 .quality-head { display: flex; gap: 16px; align-items: center; margin-top: 6px; }
 .quality-head p { margin: 0; font-size: 13.5px; color: var(--md-on-surface-variant); line-height: 1.5; }
-.quality-ring { position: relative; width: 76px; height: 76px; flex: none; }
-.quality-ring svg { width: 76px; height: 76px; transform: rotate(-90deg); }
-.quality-ring circle { fill: none; stroke-width: 7; }
-.quality-ring-track { stroke: var(--md-surface-high); }
-.quality-ring-fill { stroke-linecap: round; }
-.quality-ring-low .quality-ring-fill { stroke: var(--risk-low-accent); }
-.quality-ring-medium .quality-ring-fill { stroke: var(--risk-medium-accent); }
-.quality-ring-high .quality-ring-fill { stroke: var(--risk-high-accent); }
-.quality-ring > span { position: absolute; inset: 0; display: grid; place-items: center; font-weight: 800; font-size: 19px; }
+.quality-gauge { position: relative; width: 152px; flex: none; }
+.quality-gauge svg { width: 152px; height: auto; display: block; }
+.gauge-tick { stroke: var(--md-surface-high); stroke-width: 3; stroke-linecap: round; transition: stroke .35s ease; }
+.quality-gauge-low .gauge-tick.is-on { stroke: var(--risk-low-accent); }
+.quality-gauge-medium .gauge-tick.is-on { stroke: var(--risk-medium-accent); }
+.quality-gauge-high .gauge-tick.is-on { stroke: var(--risk-high-accent); }
+.quality-gauge-value { position: absolute; left: 0; right: 0; bottom: 0; text-align: center; font-size: 27px; font-weight: 800; line-height: 1; }
+.quality-head { flex-wrap: wrap; }
 .quality-list { list-style: none; margin: 16px 0 0; padding: 0; display: flex; flex-direction: column; gap: 9px; }
 .quality-row { display: flex; align-items: center; gap: 9px; font-size: 13px; }
 .quality-label { flex: 1; color: var(--md-on-surface-variant); }
 .quality-action { margin-top: 16px; align-self: flex-start; }
 
-.history-chart { width: 100%; height: 110px; margin-top: 8px; }
-.history-line { fill: none; stroke: var(--chart-fact); stroke-width: 2.4; stroke-linejoin: round; stroke-linecap: round; }
-.history-area { fill: url(#historyGradient); }
-.history-range { display: flex; justify-content: space-between; font-size: 12px; color: var(--md-on-surface-variant); }
+.history-bars { display: flex; align-items: flex-end; gap: 3px; height: 92px; margin-top: 10px; }
+.history-bar { flex: 1; min-width: 3px; border: 0; padding: 0; border-radius: 4px 4px 2px 2px; cursor: pointer; background: var(--md-surface-high); transition: opacity .2s ease; }
+.history-bar.is-up { background: var(--risk-high-accent); }
+.history-bar.is-down { background: var(--risk-low-accent); }
+.history-bar:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 1px; }
+.history-bars-meta { display: flex; justify-content: space-between; gap: 10px; font-size: 12px; color: var(--md-on-surface-variant); margin-top: 8px; }
+.history-readout { color: var(--md-on-surface); font-weight: 600; text-align: center; }
 .history-delta { font-size: 12.5px; font-weight: 700; padding: 5px 10px; border-radius: 999px; background: var(--md-surface-low); border: 1px solid var(--md-outline-variant); }
 .history-delta.is-up { color: var(--risk-high-accent); }
 .history-delta.is-down { color: var(--risk-low-accent); }
@@ -1216,3 +1218,32 @@ md-filled-button.upload-button { padding: 0; --md-filled-button-container-height
 }
 .weight-md-slider, .calc-md-slider { flex: 1; min-width: 110px; }
 md-input-chip { --md-input-chip-label-text-weight: 600; }
+
+/* ============ Risk stream (expressive gradient card) + dot number ============ */
+.riskstream-panel {
+  color: #ffffff;
+  border-color: transparent;
+  background:
+    radial-gradient(120% 90% at 85% -10%, rgba(233, 197, 107, .20), transparent 55%),
+    radial-gradient(100% 100% at 0% 110%, rgba(203, 185, 255, .25), transparent 55%),
+    linear-gradient(160deg, #3b2a7a 0%, #241a4d 58%, #17102e 100%);
+  box-shadow: 0 24px 48px -24px rgba(30, 16, 80, .55);
+}
+.riskstream-panel h2 { color: #ffffff; }
+.riskstream-panel .eyebrow { color: #cbb9ff; }
+.riskstream-legend { display: flex; gap: 14px; font-size: 12px; font-weight: 600; color: rgba(255, 255, 255, .72); }
+.riskstream-legend span { display: inline-flex; align-items: center; gap: 6px; }
+.riskstream-legend i { width: 8px; height: 8px; border-radius: 50%; display: inline-block; }
+.riskstream-total { display: flex; gap: 18px; align-items: center; flex-wrap: wrap; margin-top: 6px; }
+.dot-number { color: #ffffff; line-height: 0; }
+.dot-number svg { display: block; }
+.riskstream-caption { display: block; font-size: 13px; font-weight: 650; color: #ffffff; }
+.riskstream-sub { display: block; font-size: 12px; color: rgba(255, 255, 255, .62); margin-top: 2px; }
+.riskstream-svg { width: 100%; height: auto; display: block; margin-top: 4px; }
+.riskstream-readout { display: flex; gap: 14px; flex-wrap: wrap; align-items: center; font-size: 12.5px; color: rgba(255, 255, 255, .78); min-height: 22px; }
+.riskstream-readout strong { color: #ffffff; }
+.riskstream-readout-item { display: inline-flex; align-items: center; gap: 6px; font-variant-numeric: tabular-nums; }
+.riskstream-readout-item i { width: 7px; height: 7px; border-radius: 50%; display: inline-block; }
+.riskstream-axis { position: relative; height: 18px; margin-top: 2px; font-size: 11px; color: rgba(255, 255, 255, .55); }
+.riskstream-axis span { position: absolute; top: 0; white-space: nowrap; }
+.riskstream-empty { padding: 26px 0 12px; color: rgba(255, 255, 255, .72); font-size: 13.5px; line-height: 1.55; max-width: 46ch; }

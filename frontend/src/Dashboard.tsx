@@ -16,7 +16,7 @@ import { useTheme } from "./theme";
 import { fadeRise, pageVariants, springEmphasized, springSnappy } from "./motion";
 import { CustomerList, type SavedView } from "./components/CustomerList";
 import { RiskDonut } from "./components/RiskDonut";
-import { ForecastChart } from "./components/ForecastChart";
+import { RiskStream } from "./components/RiskStream";
 import { KpiCards, KpiSkeletons } from "./components/KpiCards";
 import { WeightControls } from "./components/WeightControls";
 import { RiskBars } from "./components/RiskBars";
@@ -941,36 +941,20 @@ export function Dashboard() {
           </p>
         </motion.article>
 
-        <motion.article
-          className="panel chart-panel"
-          variants={fadeRise}
-          custom={0.16}
-          initial="hidden"
-          animate="show"
-        >
-          <div className="panel-heading">
-            <div>
-              <span className="eyebrow">По срокам услуг</span>
-              <h2>Продления на горизонте 30 дней</h2>
-            </div>
-            <span className="panel-meta">Календарный ориентир</span>
-          </div>
-          <div className="chart-legend" aria-hidden="true">
-            <span>
-              <i className="fact-swatch" />
-              Сейчас
-            </span>
-            <span>
-              <i className="forecast-swatch" />
-              К сроку
-            </span>
-          </div>
-          <ForecastChart forecast={summary?.churnForecast} />
-          <p id="forecastDescription" className="chart-note">
-            Число услуг, ожидающих оплаты сейчас и приближающихся к окончанию. Это
-            календарный ориентир, не вероятность оттока.
-          </p>
-        </motion.article>
+        {summary ? (
+          <RiskStream summary={summary} customers={landscapeCustomers} />
+        ) : (
+          <motion.article
+            className="panel riskstream-panel"
+            variants={fadeRise}
+            custom={0.16}
+            initial="hidden"
+            animate="show"
+            aria-hidden="true"
+          >
+            <div className="donut-skeleton skeleton" />
+          </motion.article>
+        )}
       </section>
 
       {summary && (
