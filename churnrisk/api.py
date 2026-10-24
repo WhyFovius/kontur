@@ -54,19 +54,49 @@ from .domain import (
     summary,
     utcnow,
 )
+from .realtime import (
+    customer_realtime_history,
+    latest_realtime_event_id,
+    list_reaction_outbox,
+    list_reaction_templates,
+    list_realtime_events,
+    process_demo_event,
+    realtime_dashboard,
+    realtime_events_after,
+    realtime_metric_counts,
+    realtime_status,
+    reset_demo_data,
+    update_reaction_template,
+)
+from .realtime import (
+    simulator as demo_simulator,
+)
 from .schemas import (
     AnalyticsSummary,
     AuthProvidersResponse,
     ChurnTimelineResponse,
     CustomerListResponse,
+    CustomerRealtimeHistoryResponse,
     CustomerResponse,
+    DemoGenerateRequest,
+    DemoResetResponse,
     LoginRequest,
     LoginResponse,
     ModelSettingsResponse,
     NotificationListResponse,
     NotificationReadResponse,
+    ReactionOutboxResponse,
+    ReactionTemplate,
+    ReactionTemplateListResponse,
+    ReactionTemplatePatch,
+    RealtimeDashboardResponse,
+    RealtimeEvent,
+    RealtimeEventListResponse,
+    RealtimeStatusResponse,
     RescueQueueResponse,
     SettingsPatch,
+    SimulatorActionResponse,
+    SimulatorStartRequest,
     SnapshotRequest,
     SnapshotResponse,
 )
@@ -718,6 +748,197 @@ async def events_stream(request: Request, _: str = Depends(current_user)):
     )
 
 
+@app.get("/api/v1/realtime/status", response_model=RealtimeStatusResponse)
+async def get_realtime_status(_: str = Depends(current_user)):
+    customers, _data = _analyzed_data()
+    return await asyncio.to_thread(realtime_status, customers)
+
+
+@app.post("/api/v1/demo/generate", response_model=RealtimeEvent)
+async def generate_demo_event(
+    payload: DemoGenerateRequest, _: str = Depends(current_user)
+):
+    customers, _data = _analyzed_data()
+    try:
+        return await asyncio.to_thread(
+            process_demo_event,
+            customers,
+            scenario=payload.scenario,
+            customer_id=payload.customerId,
+            event_id=payload.eventId,
+        )
+    except RuntimeError as error:
+        if str(error) == "rate_limited":
+            raise HTTPException(
+                status_code=429, detail="Слишком много событий за минуту"
+            ) from error
+        raise
+    except ValueError as error:
+        status = 404 if "не найден" in str(error) else 422
+        raise HTTPException(status_code=status, detail=str(error)) from error
+
+
+@app.post(
+    "/api/v1/demo/simulator/start", response_model=SimulatorActionResponse
+)
+async def start_demo_simulator(
+    payload: SimulatorStartRequest, _: str = Depends(current_user)
+):
+    status = demo_simulator.start(
+        interval_seconds=payload.intervalSeconds,
+        scenario=payload.scenario,
+        customers_provider=lambda: _analyzed_data()[0],
+    )
+    return {"ok": True, "simulator": status}
+
+
+@app.post(
+    "/api/v1/demo/simulator/stop", response_model=SimulatorActionResponse
+)
+async def stop_demo_simulator(_: str = Depends(current_user)):
+    return {"ok": True, "simulator": demo_simulator.stop()}
+
+
+@app.post("/api/v1/demo/reset", response_model=DemoResetResponse)
+async def reset_demo(_: str = Depends(current_user)):
+    deleted = await asyncio.to_thread(reset_demo_data)
+    return {"ok": True, "deleted": deleted}
+
+
+@app.get("/api/v1/realtime/events", response_model=RealtimeEventListResponse)
+async def get_realtime_events(
+    limit: int = Query(default=50, ge=1, le=200),
+    offset: int = Query(default=0, ge=0),
+    severity: Literal["critical", "warning", "info"] | None = None,
+    event_type: str | None = Query(default=None, max_length=80),
+    customer_id: str | None = Query(default=None, max_length=160),
+    mode: Literal["DEMO", "LIVE"] | None = None,
+    source: str | None = Query(default=None, max_length=40),
+    q: str | None = Query(default=None, max_length=160),
+    _: str = Depends(current_user),
+):
+    return await asyncio.to_thread(
+        list_realtime_events,
+        limit=limit,
+        offset=offset,
+        severity=severity,
+        event_type=event_type,
+        customer_id=customer_id,
+        mode=mode,
+        source=source,
+        query=q,
+    )
+
+
+@app.get(
+    "/api/v1/realtime/customers/{customer_id}/history",
+    response_model=CustomerRealtimeHistoryResponse,
+)
+async def get_customer_realtime_history(
+    customer_id: str,
+    limit: int = Query(default=50, ge=1, le=200),
+    _: str = Depends(current_user),
+):
+    return await asyncio.to_thread(customer_realtime_history, customer_id, limit)
+
+
+@app.get(
+    "/api/v1/realtime/dashboard", response_model=RealtimeDashboardResponse
+)
+async def get_realtime_dashboard(
+    hours: int = Query(default=24, ge=1, le=720),
+    _: str = Depends(current_user),
+):
+    customers, _data = _analyzed_data()
+    return await asyncio.to_thread(realtime_dashboard, customers, hours)
+
+
+@app.get(
+    "/api/v1/realtime/templates", response_model=ReactionTemplateListResponse
+)
+async def get_realtime_templates(_: str = Depends(current_user)):
+    return {"items": await asyncio.to_thread(list_reaction_templates)}
+
+
+@app.patch(
+    "/api/v1/realtime/templates/{template_id}", response_model=ReactionTemplate
+)
+async def patch_realtime_template(
+    template_id: str,
+    payload: ReactionTemplatePatch,
+    _: str = Depends(current_user),
+):
+    changes = payload.model_dump(exclude_none=True)
+    if not changes:
+        raise HTTPException(status_code=422, detail="Нет изменений шаблона")
+    template = await asyncio.to_thread(update_reaction_template, template_id, changes)
+    if template is None:
+        raise HTTPException(status_code=404, detail="Шаблон реакции не найден")
+    return template
+
+
+@app.get("/api/v1/realtime/outbox", response_model=ReactionOutboxResponse)
+async def get_realtime_outbox(
+    limit: int = Query(default=50, ge=1, le=200),
+    _: str = Depends(current_user),
+):
+    return {"items": await asyncio.to_thread(list_reaction_outbox, limit)}
+
+
+def _sse_realtime_event(event: dict[str, Any]) -> str:
+    return (
+        f"id: {int(event['id'])}\n"
+        f"event: realtime_event\n"
+        f"data: {json.dumps(event, ensure_ascii=False)}\n\n"
+    )
+
+
+@app.get("/api/v1/realtime/stream")
+async def realtime_stream(
+    request: Request,
+    last_event_id: int = Query(default=0, ge=0),
+    _: str = Depends(current_user),
+):
+    """Replayable SSE feed for persisted DEMO/LIVE realtime events."""
+    try:
+        header_cursor = int(request.headers.get("last-event-id", "0"))
+    except (TypeError, ValueError):
+        header_cursor = 0
+    initial_cursor = max(last_event_id, header_cursor)
+
+    async def generate():
+        cursor = initial_cursor
+        if cursor == 0:
+            cursor = await asyncio.to_thread(latest_realtime_event_id)
+            yield _sse_event("ready", {"lastEventId": cursor, "mode": "replayable"})
+        else:
+            replay = await asyncio.to_thread(realtime_events_after, cursor)
+            for event in replay:
+                cursor = max(cursor, int(event["id"]))
+                yield _sse_realtime_event(event)
+        heartbeat_ticks = 0
+        while not await request.is_disconnected():
+            fresh = await asyncio.to_thread(realtime_events_after, cursor)
+            for event in fresh:
+                cursor = max(cursor, int(event["id"]))
+                yield _sse_realtime_event(event)
+            heartbeat_ticks += 1
+            if heartbeat_ticks >= 15:
+                heartbeat_ticks = 0
+                yield ": heartbeat\n\n"
+            await asyncio.sleep(1)
+
+    return StreamingResponse(
+        generate(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+        },
+    )
+
+
 @app.get("/api/v1/model/settings", response_model=ModelSettingsResponse)
 async def get_settings(_: str = Depends(current_user)):
     with db() as connection:
@@ -775,6 +996,7 @@ async def metrics():
         rescue_totals = rescue_queue(
             customers, weights=get_weights(connection), limit=1000
         )["totals"]
+    realtime_metrics = realtime_metric_counts()
     lines = [
         "# HELP churn_customers_total Customers by churn risk level",
         "# TYPE churn_customers_total gauge",
@@ -820,6 +1042,18 @@ async def metrics():
         "# HELP churn_rescue_value_eur Expected value of the current rescue queue in euros",
         "# TYPE churn_rescue_value_eur gauge",
         f"churn_rescue_value_eur {rescue_totals['rescueValue'] / 100:.2f}",
+        "# HELP churn_realtime_events_total Persisted realtime events by mode",
+        "# TYPE churn_realtime_events_total gauge",
+        f'churn_realtime_events_total{{mode="DEMO"}} {realtime_metrics["demo_events"]}',
+        f'churn_realtime_events_total{{mode="LIVE"}} {realtime_metrics["live_events"]}',
+        "# HELP churn_demo_simulator_running Whether the DEMO event simulator is running",
+        "# TYPE churn_demo_simulator_running gauge",
+        f'churn_demo_simulator_running {realtime_metrics["simulator_running"]}',
+        "# HELP churn_reaction_outbox Reaction outbox messages by delivery status",
+        "# TYPE churn_reaction_outbox gauge",
+        f'churn_reaction_outbox{{status="simulated_sent"}} {realtime_metrics["simulated_sent"]}',
+        f'churn_reaction_outbox{{status="queued"}} {realtime_metrics["queued"]}',
+        f'churn_reaction_outbox{{status="no_channel"}} {realtime_metrics["no_channel"]}',
         "",
     ]
     return PlainTextResponse(

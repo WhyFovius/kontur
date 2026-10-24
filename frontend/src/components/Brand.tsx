@@ -18,6 +18,77 @@ export function AezaLogo({
   );
 }
 
+const LOGO_TILE_OFFSETS = [0, 27, 54, 81] as const;
+const LOGO_E_INDEX = 1;
+const LOGO_EXPAND_DELAYS = [0.18, 0.08, 0.15, 0.22] as const;
+const LOGO_COLLAPSE_DELAYS = [0, 0.1, 0.02, 0] as const;
+
+/**
+ * Sidebar logo morph built from the two official brand assets.
+ *
+ * The full lockup is clipped into its four original keycap tiles. On
+ * collapse a/z/a travel into the shared é tile and disappear; only then
+ * does the official compact é symbol grow to rail size. On expand the
+ * symbol first shrinks into the é slot, after which the other tiles are
+ * born back out of it. No letterforms are redrawn or replaced by a font.
+ */
+export function AnimatedAezaLogo({ collapsed }: { collapsed: boolean }) {
+  return (
+    <motion.span
+      className="aeza-logo-animated"
+      initial={false}
+      animate={{ width: collapsed ? 46 : 106 }}
+      transition={springEmphasized}
+      aria-hidden="true"
+    >
+      <motion.span
+        className="aeza-logo-compact-layer"
+        initial={false}
+        animate={{
+          opacity: collapsed ? 1 : 0,
+          scale: collapsed ? 1 : 0.54,
+          x: collapsed ? 0 : 17,
+        }}
+        transition={{ ...springEmphasized, delay: collapsed ? 0.18 : 0 }}
+      >
+        <img src="/static/brand/aeza-symbol.svg" alt="" draggable={false} />
+      </motion.span>
+      <motion.span
+        className="aeza-logo-slices"
+        initial={false}
+        animate={{ x: collapsed ? -17 : 0 }}
+        transition={springEmphasized}
+      >
+        {LOGO_TILE_OFFSETS.map((offset, index) => (
+          <motion.span
+            key={offset}
+            className="aeza-logo-slice"
+            initial={false}
+            animate={{
+              x: collapsed ? LOGO_TILE_OFFSETS[LOGO_E_INDEX] : offset,
+              scale: collapsed ? (index === LOGO_E_INDEX ? 1.45 : 0.1) : 1,
+              opacity: collapsed ? 0 : 1,
+            }}
+            transition={{
+              ...springEmphasized,
+              delay: collapsed
+                ? LOGO_COLLAPSE_DELAYS[index]
+                : LOGO_EXPAND_DELAYS[index],
+            }}
+          >
+            <img
+              src="/static/brand/aeza-logo.svg"
+              alt=""
+              draggable={false}
+              style={{ transform: `translateX(${-offset}px)` }}
+            />
+          </motion.span>
+        ))}
+      </motion.span>
+    </motion.span>
+  );
+}
+
 /** Aéza pattern from the guidebook: three straight parallel lines and one
  * accent line that changes direction through a soft rounded turn. */
 export function BrandPattern({ className = "" }: { className?: string }) {

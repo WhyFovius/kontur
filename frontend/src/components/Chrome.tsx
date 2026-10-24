@@ -4,8 +4,9 @@ import type { Theme, ThemeToggleOrigin } from "../theme";
 import { THEME_WAVE_DURATION_MS } from "../theme";
 import { EASE_EMPHASIZED, springSnappy, springEmphasized, springExEffects, springFollow } from "../motion";
 import { useDragSelect } from "./useDragSelect";
-import { AezaLogo } from "./Brand";
+import { AnimatedAezaLogo } from "./Brand";
 import {
+  IconBolt,
   IconCheck,
   IconChevron,
   IconClose,
@@ -18,13 +19,14 @@ import {
   IconUsers,
 } from "../icons";
 
-export type SectionId = "overview" | "customers" | "model";
+export type SectionId = "overview" | "customers" | "model" | "live";
 export type UploadPhase = "idle" | "loading" | "success";
 
 const NAV_ITEMS: { id: SectionId; label: string; icon: typeof IconGrid }[] = [
   { id: "overview", label: "Обзор", icon: IconGrid },
   { id: "customers", label: "Клиенты", icon: IconUsers },
   { id: "model", label: "Модель риска", icon: IconSliders },
+  { id: "live", label: "Live-монитор", icon: IconBolt },
 ];
 const NAV_IDS = NAV_ITEMS.map((item) => item.id);
 
@@ -104,7 +106,6 @@ interface SidebarProps {
   onNavigate: (section: SectionId) => void;
   customerCount: string;
   username: string;
-  connectionError: boolean;
   onLogout: () => void;
   collapsed: boolean;
   onToggleSidebar: () => void;
@@ -115,7 +116,6 @@ export function Sidebar({
   onNavigate,
   customerCount,
   username,
-  connectionError,
   onLogout,
   collapsed,
   onToggleSidebar,
@@ -130,12 +130,7 @@ export function Sidebar({
   return (
     <aside className="sidebar">
       <a href="#overview" className="brand-lockup" aria-label="Aéza Контур — к обзору">
-        <span className="brand-logo-full">
-          <AezaLogo />
-        </span>
-        <span className="brand-logo-compact">
-          <AezaLogo compact />
-        </span>
+        <AnimatedAezaLogo collapsed={collapsed} />
         <span className="brand-product">
           <strong>Контур</strong>
           <small>удержание клиентов</small>
@@ -217,20 +212,6 @@ export function Sidebar({
           </motion.span>
           <span className="sidebar-toggle-label">{collapsed ? "Развернуть" : "Свернуть"}</span>
         </motion.button>
-        <div className="sidebar-note">
-          <span
-            className={`note-signal${connectionError ? " is-error" : ""}`}
-            aria-hidden="true"
-          />
-          <div>
-            <strong>{connectionError ? "Сервер недоступен" : "Снимок синхронизирован"}</strong>
-            <span>
-              {connectionError
-                ? "Показаны последние загруженные данные"
-                : "Проверка каждые 10 сек."}
-            </span>
-          </div>
-        </div>
         <div className="profile">
           <div className="avatar" aria-hidden="true">
             {(username?.[0] || "А").toUpperCase()}
@@ -374,8 +355,29 @@ export function Topbar({
   onLogout,
 }: TopbarProps) {
   const uploading = uploadPhase === "loading";
+  const [scrolled, setScrolled] = useState(false);
+
+  useEffect(() => {
+    let frame = 0;
+    const update = () => {
+      cancelAnimationFrame(frame);
+      frame = requestAnimationFrame(() => {
+        setScrolled((current) => {
+          const next = window.scrollY > 10;
+          return current === next ? current : next;
+        });
+      });
+    };
+    update();
+    window.addEventListener("scroll", update, { passive: true });
+    return () => {
+      cancelAnimationFrame(frame);
+      window.removeEventListener("scroll", update);
+    };
+  }, []);
+
   return (
-    <header className="topbar">
+    <header className={`topbar${scrolled ? " is-scrolled" : ""}`}>
       <nav className="breadcrumbs" aria-label="Хлебные крошки">
         <ol>
           <li className="crumb-brand">Aéza</li>
@@ -396,22 +398,31 @@ export function Topbar({
       </nav>
       <div className="topbar-actions">
         <span
-          className={`live-indicator sync-capsule${connectionError ? " is-error" : ""}`}
+          className={`live-indicator sync-capsule sync-capsule-note${connectionError ? " is-error" : ""}`}
           role="status"
         >
-          <span className="sync-dot" aria-hidden="true">
-            <motion.i
-              key={lastUpdatedAt ?? "init"}
-              initial={{ scale: 1.7 }}
-              animate={{ scale: 1 }}
-              transition={springSnappy}
-            />
+          <motion.span
+            key={lastUpdatedAt ?? "init"}
+            className={`note-signal${connectionError ? " is-error" : ""}`}
+            aria-hidden="true"
+            initial={{ scale: 1.55 }}
+            animate={{ scale: 1 }}
+            transition={springSnappy}
+          />
+          <span className="sync-note-copy">
+            <strong>
+              {connectionError ? "Сервер недоступен" : "Снимок синхронизирован"}
+            </strong>
+            <small>
+              {connectionError ? (
+                "Показаны последние загруженные данные"
+              ) : (
+                <>
+                  Проверка каждые 10 сек. · <UpdatedAgo at={lastUpdatedAt} />
+                </>
+              )}
+            </small>
           </span>
-          <span className="sync-label">
-            {connectionError ? "Нет связи с сервером" : "Синхронизация активна"}
-          </span>
-          <span className="sync-divider" aria-hidden="true" />
-          <UpdatedAgo at={lastUpdatedAt} />
         </span>
         <ThemeToggle theme={theme} onToggle={onToggleTheme} />
         <md-filled-button
