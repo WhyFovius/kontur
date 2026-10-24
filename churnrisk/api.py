@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import base64
 import hashlib
 import logging
 import os
@@ -23,6 +24,7 @@ from fastapi.security import APIKeyCookie
 from fastapi.staticfiles import StaticFiles
 from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
+from . import oidc as oidc_service
 from .config import (
     MAX_SNAPSHOT_BYTES,
     SESSION_DAYS,
@@ -34,12 +36,15 @@ from .domain import (
     FEATURE_LABELS,
     RISK_THRESHOLDS,
     analyze,
+    churn_timeline,
     iso,
     summary,
     utcnow,
 )
 from .schemas import (
     AnalyticsSummary,
+    AuthProvidersResponse,
+    ChurnTimelineResponse,
     CustomerListResponse,
     CustomerResponse,
     LoginRequest,
@@ -231,7 +236,36 @@ async def _username_for_token(token: str | None) -> str:
     return str(row["username"])
 
 
-async def current_user(token: str | None = Security(session_cookie)) -> str:
+def _basic_auth_username(request: Request) -> str | None:
+    """Optional HTTP Basic fallback (API clients, collectors).
+
+    Returns the admin name when a valid ``Authorization: Basic`` header
+    is present, None when there is no Basic header, and raises 401 for
+    a malformed/wrong one so a bad credential never falls through to a
+    cookie session.
+    """
+    header = request.headers.get("authorization", "")
+    scheme, _, credentials = header.partition(" ")
+    if scheme.casefold() != "basic" or not credentials:
+        return None
+    try:
+        decoded = base64.b64decode(credentials, validate=True).decode("utf-8")
+        username, _, password = decoded.partition(":")
+    except (ValueError, UnicodeDecodeError):
+        raise HTTPException(
+            status_code=401, detail="Некорректный заголовок Basic-авторизации"
+        ) from None
+    if not verify_admin(username, password):
+        raise HTTPException(status_code=401, detail="Неверный логин или пароль")
+    return os.getenv("ADMIN_USERNAME", "admin").strip()
+
+
+async def current_user(
+    request: Request, token: str | None = Security(session_cookie)
+) -> str:
+    basic_username = _basic_auth_username(request)
+    if basic_username is not None:
+        return basic_username
     return await _username_for_token(token)
 
 
@@ -244,6 +278,7 @@ def _public_customer(customer: dict[str, Any]) -> dict[str, Any]:
         "paymentTerm",
         "autoprolong",
         "expiresAt",
+        "deletedAt",
     )
     return {
         "id": customer["id"],
@@ -321,6 +356,139 @@ async def login_page(request: Request):
     return RedirectResponse("/", status_code=303)
 
 
+def _create_session(username: str) -> tuple[str, datetime]:
+    """Create a server-side session; shared by password and OIDC login."""
+    token = secrets.token_urlsafe(36)
+    expires_at = utcnow() + timedelta(days=SESSION_DAYS)
+    with db() as connection:
+        connection.execute(
+            "DELETE FROM sessions WHERE expires_at < ?", (iso(utcnow()),)
+        )
+        connection.execute(
+            "INSERT INTO sessions (token_hash, username, expires_at) VALUES (?, ?, ?)",
+            (
+                hashlib.sha256(token.encode("utf-8")).hexdigest(),
+                username,
+                iso(expires_at),
+            ),
+        )
+    return token, expires_at
+
+
+def _set_session_cookie(response: Response, token: str) -> None:
+    response.set_cookie(
+        "churn_session",
+        token,
+        httponly=True,
+        secure=os.getenv("COOKIE_SECURE", "false").strip().casefold() == "true",
+        samesite="lax",
+        max_age=SESSION_DAYS * 86400,
+        path="/",
+    )
+
+
+def _oidc_redirect_uri(request: Request, config) -> str:
+    return config.redirect_uri or str(request.url_for("oidc_callback"))
+
+
+@app.get("/api/v1/auth/providers", response_model=AuthProvidersResponse)
+async def auth_providers():
+    """Public: which login methods the panel should offer."""
+    config = oidc_service.load_config()
+    return {
+        "password": bool(os.getenv("ADMIN_PASSWORD")),
+        "oidc": {
+            "enabled": config is not None,
+            "name": config.provider_name if config else None,
+            "loginUrl": "/api/v1/auth/oidc/login" if config else None,
+        },
+    }
+
+
+@app.get("/api/v1/auth/oidc/login", include_in_schema=True)
+async def oidc_login(request: Request):
+    config = oidc_service.load_config()
+    if config is None:
+        raise HTTPException(status_code=503, detail="OIDC не настроен")
+    try:
+        discovery = oidc_service.discover(config.issuer)
+    except oidc_service.OidcError:
+        raise HTTPException(
+            status_code=502, detail="OIDC провайдер недоступен"
+        ) from None
+    state = secrets.token_urlsafe(32)
+    nonce = secrets.token_urlsafe(32)
+    verifier = oidc_service.code_verifier()
+    expires_at = utcnow() + timedelta(minutes=10)
+    with db() as connection:
+        connection.execute(
+            "DELETE FROM oidc_states WHERE expires_at < ?", (iso(utcnow()),)
+        )
+        connection.execute(
+            "INSERT INTO oidc_states (state_hash, nonce, code_verifier, expires_at)"
+            " VALUES (?, ?, ?, ?)",
+            (
+                hashlib.sha256(state.encode("utf-8")).hexdigest(),
+                nonce,
+                verifier,
+                iso(expires_at),
+            ),
+        )
+    url = oidc_service.build_authorize_url(
+        config,
+        discovery,
+        state=state,
+        nonce=nonce,
+        challenge=oidc_service.code_challenge(verifier),
+        redirect_uri=_oidc_redirect_uri(request, config),
+    )
+    return RedirectResponse(url, status_code=302)
+
+
+@app.get("/api/v1/auth/oidc/callback", include_in_schema=True)
+async def oidc_callback(
+    request: Request,
+    code: str | None = Query(default=None),
+    state: str | None = Query(default=None),
+    error: str | None = Query(default=None),
+):
+    config = oidc_service.load_config()
+    if config is None:
+        raise HTTPException(status_code=503, detail="OIDC не настроен")
+    if error or not code or not state:
+        return RedirectResponse("/login?oidc_error=1", status_code=303)
+    state_hash = hashlib.sha256(state.encode("utf-8")).hexdigest()
+    with db() as connection:
+        row = connection.execute(
+            "SELECT nonce, code_verifier, expires_at FROM oidc_states"
+            " WHERE state_hash=?",
+            (state_hash,),
+        ).fetchone()
+        connection.execute("DELETE FROM oidc_states WHERE state_hash=?", (state_hash,))
+    if row is None or datetime.fromisoformat(row["expires_at"]) <= utcnow():
+        return RedirectResponse("/login?oidc_error=1", status_code=303)
+    try:
+        discovery = oidc_service.discover(config.issuer)
+        claims = oidc_service.exchange_and_verify(
+            config,
+            discovery,
+            code=code,
+            verifier=str(row["code_verifier"]),
+            nonce=str(row["nonce"]),
+            redirect_uri=_oidc_redirect_uri(request, config),
+        )
+        if not oidc_service.is_allowed(config, claims):
+            return RedirectResponse("/login?oidc_error=1", status_code=303)
+        username = oidc_service.identity_from_claims(claims)
+    except oidc_service.OidcError:
+        logger.warning("OIDC callback rejected", exc_info=True)
+        return RedirectResponse("/login?oidc_error=1", status_code=303)
+    token, _expires = _create_session(username)
+    response = RedirectResponse("/", status_code=303)
+    _set_session_cookie(response, token)
+    return response
+
+
 @app.post("/api/v1/auth/login", response_model=LoginResponse)
 async def login(payload: LoginRequest, request: Request, response: Response):
     remote_host = request.client.host if request.client else "unknown"
@@ -339,29 +507,8 @@ async def login(payload: LoginRequest, request: Request, response: Response):
 
     clear_login_failures(rate_key)
     username = os.getenv("ADMIN_USERNAME", "admin").strip()
-    token = secrets.token_urlsafe(36)
-    expires_at = utcnow() + timedelta(days=SESSION_DAYS)
-    with db() as connection:
-        connection.execute(
-            "DELETE FROM sessions WHERE expires_at < ?", (iso(utcnow()),)
-        )
-        connection.execute(
-            "INSERT INTO sessions (token_hash, username, expires_at) VALUES (?, ?, ?)",
-            (
-                hashlib.sha256(token.encode("utf-8")).hexdigest(),
-                username,
-                iso(expires_at),
-            ),
-        )
-    response.set_cookie(
-        "churn_session",
-        token,
-        httponly=True,
-        secure=os.getenv("COOKIE_SECURE", "false").strip().casefold() == "true",
-        samesite="lax",
-        max_age=SESSION_DAYS * 86400,
-        path="/",
-    )
+    token, expires_at = _create_session(username)
+    _set_session_cookie(response, token)
     return {"username": username, "expiresAt": iso(expires_at)}
 
 
@@ -433,6 +580,14 @@ async def analytics_summary(_: str = Depends(current_user)):
     return {**data, "currency": "EUR", "unit": "eurocents"}
 
 
+@app.get(
+    "/api/v1/analytics/churn-timeline", response_model=ChurnTimelineResponse
+)
+async def analytics_churn_timeline(_: str = Depends(current_user)):
+    customers, _data = _analyzed_data()
+    return churn_timeline(customers)
+
+
 @app.get("/api/v1/model/settings", response_model=ModelSettingsResponse)
 async def get_settings(_: str = Depends(current_user)):
     with db() as connection:
@@ -476,7 +631,15 @@ async def put_snapshot(payload: SnapshotRequest, _: str = Depends(current_user))
 
 @app.get("/metrics", response_class=PlainTextResponse)
 async def metrics():
-    _, data = _analyzed_data()
+    customers, data = _analyzed_data()
+    timeline = churn_timeline(customers)
+    timeline_totals = timeline["totals"]
+    rated_scores = [
+        customer["score"] for customer in customers if customer["score"] is not None
+    ]
+    average_score = (
+        sum(rated_scores) / len(rated_scores) if rated_scores else 0.0
+    )
     lines = [
         "# HELP churn_customers_total Customers by churn risk level",
         "# TYPE churn_customers_total gauge",
@@ -487,6 +650,32 @@ async def metrics():
         "# HELP churn_estimated_loss_eur Potential three-month revenue loss in euros",
         "# TYPE churn_estimated_loss_eur gauge",
         f"churn_estimated_loss_eur {data['estimatedLoss'] / 100:.2f}",
+        "# HELP churn_monthly_revenue_at_risk_eur Risk-weighted monthly revenue in euros",
+        "# TYPE churn_monthly_revenue_at_risk_eur gauge",
+        f"churn_monthly_revenue_at_risk_eur {data['monthlyRevenueAtRisk'] / 100:.2f}",
+        "# HELP churn_average_score Mean risk score of rated customers",
+        "# TYPE churn_average_score gauge",
+        f"churn_average_score {average_score:.2f}",
+        "# HELP churn_services_at_risk Services awaiting payment or expiring without autoprolong",
+        "# TYPE churn_services_at_risk gauge",
+        f"churn_services_at_risk {data['atRiskServices']}",
+        "# HELP churn_services_at_risk_30d Services at risk in the next 30 days (timeline forecast)",
+        "# TYPE churn_services_at_risk_30d gauge",
+        f"churn_services_at_risk_30d {timeline_totals['servicesAtRisk30d']}",
+        "# HELP churn_expected_nonrenewals_30d Risk-weighted expected non-renewals in 30 days",
+        "# TYPE churn_expected_nonrenewals_30d gauge",
+        f"churn_expected_nonrenewals_30d {timeline_totals['expectedNonRenewals30d']:.2f}",
+        "# HELP churn_deleted_services_90d Services deleted in the last 90 days (timeline fact)",
+        "# TYPE churn_deleted_services_90d gauge",
+        f"churn_deleted_services_90d {timeline_totals['deleted90d']}",
+        "# HELP churn_forecast_services Services expected to churn by horizon day N",
+        "# TYPE churn_forecast_services gauge",
+        *[
+            f'churn_forecast_services{{horizon_days="{day}"}} {count}'
+            for day, count in zip(
+                data["churnForecast"]["days"], data["churnForecast"]["counts"]
+            )
+        ],
         "",
     ]
     return PlainTextResponse(

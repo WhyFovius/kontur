@@ -371,3 +371,123 @@ def summary(customers: list[dict[str, Any]]) -> dict[str, Any]:
         "atRiskServices": at_risk_services,
         "churnForecast": {"days": [0, 7, 14, 21, 30], "counts": forecast},
     }
+
+
+# Buckets for the fact/forecast churn chart: historical deletions look
+# back 90 days; the forecast looks forward 90 days.  Both series are
+# derived from the same analysed customers, so the chart always agrees
+# with the rating, the money estimate and /metrics.
+PAST_BUCKETS: tuple[tuple[float, float, str], ...] = (
+    (-90, -61, "90–61 дн. назад"),
+    (-60, -31, "60–31 дн. назад"),
+    (-30, -1, "30–1 дн. назад"),
+)
+FUTURE_BUCKETS: tuple[tuple[float, float, str], ...] = (
+    (0, 7, "0–7 дн."),
+    (8, 14, "8–14 дн."),
+    (15, 30, "15–30 дн."),
+    (31, 90, "31–90 дн."),
+)
+
+
+def _bucket_index(buckets, days: float) -> int | None:
+    for index, (low, high, _label) in enumerate(buckets):
+        if low <= days <= high:
+            return index
+    return None
+
+
+def churn_timeline(
+    customers: list[dict[str, Any]], now: datetime | None = None
+) -> dict[str, Any]:
+    """Historical deletions (fact) + expected non-renewals (forecast).
+
+    Fact: services with status ``deleted`` bucketed by deletion date
+    (``deletedAt`` when present, otherwise ``expiresAt`` as the last
+    known end of the service).  Forecast: billable services expiring in
+    the next 90 days that are at risk — without autoprolong, or owned by
+    a medium/high-risk customer — plus every ``prolong_wait`` service in
+    the nearest bucket.  ``expectedNonRenewals`` weights each at-risk
+    service by the same risk factor used for the money estimate
+    (0.80 / 0.45 / 0.15), so the forecast is a fractional expectation,
+    not a promise.
+    """
+    moment = now or utcnow()
+    past_deleted = [0] * len(PAST_BUCKETS)
+    future_at_risk = [0] * len(FUTURE_BUCKETS)
+    future_expected = [0.0] * len(FUTURE_BUCKETS)
+    deleted_total = 0
+
+    for customer in customers:
+        factor = RISK_FACTORS.get(customer.get("riskLevel"), 0)
+        risky_owner = customer.get("riskLevel") in {"high", "medium"}
+        for service in customer.get("services", []):
+            status = str(service.get("status", "")).lower()
+            if status == "deleted":
+                deleted_total += 1
+                deleted_at = parse_date(service.get("deletedAt")) or parse_date(
+                    service.get("expiresAt")
+                )
+                if deleted_at is not None:
+                    days = (deleted_at - moment).total_seconds() / 86400
+                    index = _bucket_index(PAST_BUCKETS, days)
+                    if index is not None:
+                        past_deleted[index] += 1
+                continue
+            if status == "prolong_wait":
+                future_at_risk[0] += 1
+                future_expected[0] += factor
+                continue
+            if status not in {"active", "suspended"}:
+                continue
+            expires = parse_date(service.get("expiresAt"))
+            if expires is None:
+                continue
+            days = (expires - moment).total_seconds() / 86400
+            index = _bucket_index(FUTURE_BUCKETS, days)
+            if index is None:
+                continue
+            if service.get("autoprolong", False) and not risky_owner:
+                continue
+            future_at_risk[index] += 1
+            future_expected[index] += factor
+
+    at_risk_30d = sum(future_at_risk[:3])
+    expected_30d = round(sum(future_expected[:3]), 2)
+    return {
+        "generatedAt": iso(moment),
+        "past": [
+            {
+                "label": label,
+                "fromDays": int(low),
+                "toDays": int(high),
+                "deleted": past_deleted[index],
+            }
+            for index, (low, high, label) in enumerate(PAST_BUCKETS)
+        ],
+        "future": [
+            {
+                "label": label,
+                "fromDays": int(low),
+                "toDays": int(high),
+                "servicesAtRisk": future_at_risk[index],
+                "expectedNonRenewals": round(future_expected[index], 2),
+            }
+            for index, (low, high, label) in enumerate(FUTURE_BUCKETS)
+        ],
+        "totals": {
+            "deletedServices": deleted_total,
+            "deleted90d": sum(past_deleted),
+            "servicesAtRisk30d": at_risk_30d,
+            "expectedNonRenewals30d": expected_30d,
+            "servicesAtRisk90d": sum(future_at_risk),
+            "expectedNonRenewals90d": round(sum(future_expected), 2),
+        },
+        "method": (
+            "Факт — услуги со статусом deleted по дате удаления "
+            "(deletedAt, иначе expiresAt). Прогноз — услуги под риском: "
+            "prolong_wait и истекающие без автопродления или у клиентов "
+            "среднего/высокого риска; ожидаемые непродления взвешены "
+            "коэффициентами риска 0,80 / 0,45 / 0,15."
+        ),
+    }

@@ -2,8 +2,8 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { motion, useMotionValue, useReducedMotion, useSpring } from "framer-motion";
 import type { Customer, Summary } from "../types";
 import { integer, money } from "../format";
-import { fadeRise, springFollow } from "../motion";
-import { DotNumber } from "./DotNumber";
+import { fadeRise, springEmphasized, springFollow } from "../motion";
+import { AnimatedNumber } from "./AnimatedNumber";
 
 type Level = "high" | "medium" | "low";
 
@@ -31,8 +31,6 @@ const H = 250;
 const MID = H / 2;
 const PAD_X = 36;
 const MAX_HALF = 96;
-const FLOW_PERIOD_MS = 2800;
-const REVEAL_MS = 850;
 
 type Pt = readonly [number, number];
 
@@ -64,14 +62,13 @@ function smoothPath(p: Pt[], move = true): string {
  * Symmetric streamgraph fed with real data: revenue at risk per risk
  * level across service-expiry horizons, computed from the top-N customers
  * the dashboard already loads. The big total is the portfolio summary
- * figure, rendered as a counting dot-matrix number.
+ * figure, rendered as a large readable counting number.
  *
- * The stream is alive without becoming a React render loop: a single
- * requestAnimationFrame writes the three path `d` attributes directly,
- * with a wall-clock phase (identical timing at 60 Hz and 360 Hz). The
- * travelling swell uses the same factor for every cumulative layer, so
- * bands can never cross. Motion pauses offscreen, in hidden tabs and
- * under prefers-reduced-motion. Hover is continuous: the guide chases the
+ * Smoothness contract: band geometry is painted only while a data
+ * change morphs (a spring on the `d` attribute); the perpetual "alive"
+ * drift is a compositor transform on the whole <g> (CSS keyframes), so
+ * an idle page does zero path repaints and every animation runs at the
+ * display's native refresh rate. Hover is continuous: the guide chases the
  * pointer on a spring motion value and the readout interpolates between
  * bucket centres, exactly like the drawn curve between those centres.
  */
@@ -85,7 +82,6 @@ export function RiskStream({
   const [hoverT, setHoverT] = useState<number | null>(null);
   const reduceMotion = useReducedMotion();
   const svgRef = useRef<SVGSVGElement | null>(null);
-  const pathRefs = useRef<Array<SVGPathElement | null>>([]);
   const pendingHover = useRef<number | null>(null);
   const hoverFrame = useRef<number | null>(null);
 
@@ -124,112 +120,24 @@ export function RiskStream({
       LEVELS.slice(0, li + 1).reduce((sum, l) => sum + row[l.key] * k, 0),
     ),
   );
-  const cumRef = useRef(cum);
-  cumRef.current = cum;
 
   // Virtual zero points just inside both edges: the stream flows in
   // from a tip and out to a tip, symmetric and intentional at both
   // ends, instead of starting mid-air wherever bucket 0 happens to be.
   const xs = [10, ...BUCKETS.map((_, i) => x(i)), W - 10];
-  const band = (c: number[], phase = 0, reveal = 1) => {
+  const band = (c: number[], reveal = 1) => {
     const v = [0, ...c, 0];
-    const geometry = v.map((vv, i) => {
-      const endpoint = i === 0 || i === v.length - 1;
-      const envelope = endpoint ? 0 : Math.sin((i / (v.length - 1)) * Math.PI);
-      // One shared swell factor and centre drift for all layers keeps
-      // the cumulative ordering intact while the wave travels.
-      const factor = 1 + 0.038 * Math.sin(phase - i * 0.72) * envelope;
-      const centre = MID + Math.sin(phase * 0.82 - i * 0.58) * 2.2 * envelope * reveal;
-      return { centre, half: Math.max(0, vv * factor * reveal) };
-    });
+    const geometry = v.map((vv) => ({
+      centre: MID,
+      half: Math.max(0, vv * reveal),
+    }));
     return (
       smoothPath(geometry.map((g, i) => [xs[i], g.centre - g.half] as const)) +
       smoothPath(geometry.map((g, i) => [xs[i], g.centre + g.half] as const).reverse(), false) +
       " Z"
     );
   };
-  const flat = band(matrix.map(() => 0), 0, 0);
-  const streamKey = useMemo(
-    () => matrix.map((row) => LEVELS.map((l) => row[l.key]).join("/")).join("|"),
-    [matrix],
-  );
-
-  useEffect(() => {
-    if (!hasData) return undefined;
-
-    const draw = (phase: number, reveal: number) => {
-      [2, 1, 0].forEach((li) => {
-        pathRefs.current[li]?.setAttribute("d", band(cumRef.current[li], phase, reveal));
-      });
-    };
-
-    if (reduceMotion) {
-      draw(0, 1);
-      return undefined;
-    }
-
-    let raf = 0;
-    let lastDraw = 0;
-    let running = false;
-    let visible = !document.hidden;
-    let inView = true;
-    const started = performance.now();
-
-    const loop = (now: number) => {
-      if (!running) return;
-      // Path repaints are the one non-compositor cost here: on 240-360 Hz
-      // panels, drawing every rAF quadruples paint work for no visible
-      // gain, so draws are capped at ~120/s (60 Hz displays unaffected).
-      if (now - lastDraw < 8) {
-        raf = requestAnimationFrame(loop);
-        return;
-      }
-      lastDraw = now;
-      const elapsed = now - started;
-      const reveal = 1 - Math.pow(1 - Math.min(1, elapsed / REVEAL_MS), 3);
-      draw((elapsed / FLOW_PERIOD_MS) * Math.PI * 2, reveal);
-      raf = requestAnimationFrame(loop);
-    };
-    const start = () => {
-      if (running || !visible || !inView) return;
-      running = true;
-      raf = requestAnimationFrame(loop);
-    };
-    const stop = () => {
-      running = false;
-      cancelAnimationFrame(raf);
-    };
-    const onVisibility = () => {
-      visible = !document.hidden;
-      if (visible) start();
-      else stop();
-    };
-
-    const observer =
-      typeof IntersectionObserver === "undefined"
-        ? null
-        : new IntersectionObserver(
-            ([entry]) => {
-              inView = entry.isIntersecting;
-              if (inView) start();
-              else stop();
-            },
-            { threshold: 0.05 },
-          );
-    if (observer && svgRef.current) observer.observe(svgRef.current);
-    document.addEventListener("visibilitychange", onVisibility);
-    start();
-
-    return () => {
-      stop();
-      observer?.disconnect();
-      document.removeEventListener("visibilitychange", onVisibility);
-    };
-    // `band` closes over constants and cumRef; streamKey intentionally
-    // restarts the reveal only when the underlying data really changes.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [hasData, reduceMotion, streamKey]);
-
+  const flat = band(matrix.map(() => 0));
   useEffect(
     () => () => {
       if (hoverFrame.current !== null) cancelAnimationFrame(hoverFrame.current);
@@ -310,7 +218,11 @@ export function RiskStream({
       </div>
 
       <div className="riskstream-total">
-        <DotNumber value={summary.estimatedLoss} pitch={6} />
+        <AnimatedNumber
+          value={summary.estimatedLoss}
+          format={money}
+          className="riskstream-total-value"
+        />
         <div>
           <span className="riskstream-caption">выручка под риском · 90 дней</span>
           <span className="riskstream-sub">
@@ -332,15 +244,14 @@ export function RiskStream({
             onPointerMove={updateHover}
             onPointerLeave={clearHover}
           >
-            <g>
+            <g className="riskstream-flow">
               {[2, 1, 0].map((li) => (
-                <path
+                <motion.path
                   key={LEVELS[li].key}
-                  ref={(el) => {
-                    pathRefs.current[li] = el;
-                  }}
                   className="riskstream-band"
-                  d={flat}
+                  initial={reduceMotion ? false : { d: flat }}
+                  animate={{ d: band(cum[li]) }}
+                  transition={{ ...springEmphasized, delay: 0.08 * (2 - li) }}
                   fill={LEVELS[li].color}
                   opacity={li === 2 ? 0.88 : 0.96}
                 />

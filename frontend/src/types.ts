@@ -10,6 +10,7 @@ export interface ServiceItem {
   paymentTerm?: string;
   autoprolong?: boolean;
   expiresAt?: string;
+  deletedAt?: string;
 }
 
 export interface Customer {
@@ -46,6 +47,36 @@ export interface Summary {
   churnForecast: { days: number[]; counts: number[] };
   currency?: string;
   unit?: string;
+}
+
+export interface ChurnPastBucket {
+  label: string;
+  fromDays: number;
+  toDays: number;
+  deleted: number;
+}
+
+export interface ChurnFutureBucket {
+  label: string;
+  fromDays: number;
+  toDays: number;
+  servicesAtRisk: number;
+  expectedNonRenewals: number;
+}
+
+export interface ChurnTimelineData {
+  generatedAt: string;
+  past: ChurnPastBucket[];
+  future: ChurnFutureBucket[];
+  totals: {
+    deletedServices: number;
+    deleted90d: number;
+    servicesAtRisk30d: number;
+    expectedNonRenewals30d: number;
+    servicesAtRisk90d: number;
+    expectedNonRenewals90d: number;
+  };
+  method: string;
 }
 
 export interface ModelSettings {

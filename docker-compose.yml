@@ -9,6 +9,13 @@ services:
       ADMIN_PASSWORD: ${ADMIN_PASSWORD:?Set ADMIN_PASSWORD in .env before starting}
       COOKIE_SECURE: ${COOKIE_SECURE:-false}
       DATABASE_PATH: /app/data/churn.db
+      OIDC_ISSUER: ${OIDC_ISSUER:-}
+      OIDC_CLIENT_ID: ${OIDC_CLIENT_ID:-}
+      OIDC_CLIENT_SECRET: ${OIDC_CLIENT_SECRET:-}
+      OIDC_REDIRECT_URI: ${OIDC_REDIRECT_URI:-}
+      OIDC_SCOPES: ${OIDC_SCOPES:-openid profile email}
+      OIDC_PROVIDER_NAME: ${OIDC_PROVIDER_NAME:-SSO}
+      OIDC_ALLOWED_USERS: ${OIDC_ALLOWED_USERS:-}
     volumes:
       - ${DATA_DIR:-./data}:/app/data
       - ./static:/app/static

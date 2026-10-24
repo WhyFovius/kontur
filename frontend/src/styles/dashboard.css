@@ -383,11 +383,7 @@ a { color: var(--md-primary); }
 }
 .panel {
   border-radius: var(--shape-xl);
-  background:
-    radial-gradient(520px circle at var(--mx, 50%) var(--my, 50%),
-      color-mix(in srgb, var(--md-primary) calc(var(--spot, 0) * 7%), transparent),
-      transparent 70%),
-    var(--md-surface-lowest);
+  background: var(--md-surface-lowest);
   border: 1px solid color-mix(in srgb, var(--md-outline-variant) 70%, transparent);
   box-shadow: var(--elevation-1);
   padding: 26px;
@@ -1265,8 +1261,6 @@ md-input-chip { --md-input-chip-label-text-weight: 600; }
 .riskstream-legend span { display: inline-flex; align-items: center; gap: 6px; }
 .riskstream-legend i { width: 8px; height: 8px; border-radius: 50%; display: inline-block; }
 .riskstream-total { display: flex; gap: 18px; align-items: center; flex-wrap: wrap; margin-top: 6px; }
-.dot-number { color: #ffffff; line-height: 0; }
-.dot-number svg { display: block; }
 .riskstream-caption { display: block; font-size: 13px; font-weight: 650; color: #ffffff; }
 .riskstream-sub { display: block; font-size: 12px; color: rgba(255, 255, 255, .62); margin-top: 2px; }
 .riskstream-svg { width: 100%; height: auto; display: block; margin-top: 4px; }
@@ -1288,14 +1282,8 @@ md-input-chip { --md-input-chip-label-text-weight: 600; }
 .riskstream-empty { padding: 26px 0 12px; color: rgba(255, 255, 255, .72); font-size: 13.5px; line-height: 1.55; max-width: 46ch; }
 
 /* ----- Collapsible sidebar, adaptive scale, smoothing, liveness ----- */
-@property --spot {
-  syntax: "<number>";
-  inherits: false;
-  initial-value: 0;
-}
 svg { shape-rendering: geometricPrecision; }
 .customer-row, .queue-row, .nav-pill, .seg-pill { backface-visibility: hidden; }
-.panel { transition: --spot 0.35s ease; }
 .sidebar { overflow: hidden; }
 .brand-name, .nav-label, .profile-info { white-space: nowrap; }
 
@@ -1562,7 +1550,7 @@ h1, h2, h3,
 .breadcrumbs li { display: inline-flex; align-items: center; }
 .crumb-brand {
   padding: 4px 8px 5px;
-  border-radius: 8px 12px 8px 5px;
+  border-radius: var(--shape-md);
   background: var(--brand-sky); color: #001a26;
   font-weight: 900; letter-spacing: .08em;
 }
@@ -2186,7 +2174,7 @@ md-filled-button.upload-button { flex: 0 0 auto; max-width: 100%; }
 
 /* ----- expressive roles across ordinary surfaces ------------------------ */
 .panel {
-  transition: --spot .35s ease, border-color .25s var(--motion-standard), box-shadow .25s var(--motion-standard);
+  transition: border-color .25s var(--motion-standard), box-shadow .25s var(--motion-standard);
 }
 .panel-heading > div:first-child { min-width: 0; }
 .panel-heading h2 { overflow-wrap: anywhere; }
@@ -2250,4 +2238,125 @@ md-filled-button.upload-button { flex: 0 0 auto; max-width: 100%; }
 @media (prefers-reduced-motion: reduce) {
   .drag-thumb, .segmented-label, .risk-dot, .mascot-stage-figure,
   .mobile-nav-icon-wrap { transition: none; }
+}
+
+
+/* ----- Feedback round 4: readable money, compositor stream drift,
+   fact/forecast churn chart, stable upload label -------------------- */
+.riskstream-total-value {
+  font-family: var(--font-display);
+  font-size: clamp(36px, 4.2vw, 52px);
+  font-weight: 800;
+  letter-spacing: -.02em;
+  line-height: 1;
+  color: #ffffff;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+/* The living drift is a compositor transform on the band group: zero
+   path repaints while idle, native refresh-rate motion everywhere. */
+.riskstream-flow {
+  transform-box: fill-box;
+  transform-origin: center;
+  animation: stream-drift 6.5s ease-in-out infinite alternate;
+}
+@keyframes stream-drift {
+  from { transform: translateY(1.6px) scaleY(.994); }
+  to { transform: translateY(-1.6px) scaleY(1.012); }
+}
+
+/* Fact (solid) vs forecast (hatched) — never confusable. */
+.churn-timeline-legend {
+  display: flex; flex-wrap: wrap; gap: 8px 16px; align-items: center;
+  font-size: 12px; color: var(--md-on-surface-variant);
+}
+.churn-timeline-legend span { display: inline-flex; align-items: center; }
+.churn-swatch {
+  width: 14px; height: 14px; flex: none; margin-right: 7px;
+  border-radius: 4px;
+}
+.churn-swatch-fact { background: var(--risk-high-accent); }
+.churn-swatch-forecast {
+  background: repeating-linear-gradient(45deg, var(--brand-sky) 0 3px, transparent 3px 7px);
+  box-shadow: inset 0 0 0 1.5px color-mix(in srgb, var(--brand-sky) 65%, var(--md-on-surface));
+}
+.churn-swatch-expected {
+  width: 10px; height: 10px; border-radius: var(--shape-full);
+  background: var(--brand-orange);
+}
+.churn-timeline-chart { display: flex; gap: 10px; align-items: stretch; }
+.churn-col {
+  flex: 1 1 0; min-width: 0;
+  display: flex; flex-direction: column; align-items: center; gap: 8px;
+}
+.churn-value {
+  font-family: var(--font-display); font-size: 16px; font-weight: 700;
+  line-height: 1.1; text-align: center; font-variant-numeric: tabular-nums;
+  display: flex; flex-direction: column; align-items: center; min-height: 32px; justify-content: flex-end;
+}
+.churn-value small { font-size: 11px; font-weight: 700; color: var(--brand-orange); }
+.churn-track {
+  position: relative; width: min(46px, 100%); height: 128px;
+  border-radius: 12px 12px 8px 8px;
+  background: color-mix(in srgb, var(--md-on-surface) 6%, transparent);
+  overflow: hidden;
+}
+.churn-bar {
+  position: absolute; inset: 0; display: block;
+  border-radius: inherit; transform-origin: bottom;
+}
+.churn-bar-fact {
+  background: linear-gradient(180deg,
+    color-mix(in srgb, var(--risk-high-accent) 82%, #ffffff),
+    var(--risk-high-accent));
+}
+.churn-bar-forecast {
+  background:
+    repeating-linear-gradient(45deg,
+      color-mix(in srgb, var(--brand-sky) 55%, transparent) 0 4px,
+      transparent 4px 9px),
+    color-mix(in srgb, var(--brand-sky) 14%, transparent);
+  box-shadow: inset 0 0 0 1.5px color-mix(in srgb, var(--brand-sky) 60%, var(--md-on-surface));
+}
+.churn-expected-dot {
+  position: absolute; left: 50%; z-index: 1;
+  width: 10px; height: 10px; border-radius: var(--shape-full);
+  background: var(--brand-orange);
+  transform: translate(-50%, 50%);
+  box-shadow: 0 0 0 2px var(--md-surface-lowest);
+}
+.churn-divider {
+  flex: none; display: flex; flex-direction: column; align-items: center;
+  gap: 6px; padding-top: 40px;
+  border-left: 2px dashed color-mix(in srgb, var(--md-outline) 70%, transparent);
+  margin-left: 2px; padding-left: 8px;
+}
+.churn-divider span {
+  writing-mode: vertical-rl; font-size: 10.5px; font-weight: 700;
+  letter-spacing: .12em; text-transform: uppercase;
+  color: var(--md-on-surface-variant);
+}
+.churn-label {
+  font-size: 11.5px; line-height: 1.3; text-align: center;
+  color: var(--md-on-surface-variant);
+}
+.churn-timeline-totals {
+  display: flex; flex-wrap: wrap; gap: 8px 22px; margin-top: 16px;
+  font-size: 13px; color: var(--md-on-surface-variant);
+}
+.churn-timeline-totals strong { color: var(--md-on-surface); font-variant-numeric: tabular-nums; }
+
+/* Upload label: opacity-only crossfade (JS side) + reserved width —
+   the button box itself never moves between phases. */
+.upload-label-layer { will-change: opacity; }
+
+@media (max-width: 640px) {
+  .churn-timeline-chart { gap: 6px; }
+  .churn-track { height: 104px; }
+  .churn-label { font-size: 10.5px; }
+  .riskstream-total-value { font-size: 34px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .riskstream-flow { animation: none; }
+  .upload-label-layer { will-change: auto; }
 }
