@@ -45,6 +45,16 @@ def _rows(value: Any, path: str) -> list[dict[str, Any]]:
 
 
 def _fields(row: dict[str, Any], path: str) -> dict[str, Any]:
+    if not any(
+        alias in row
+        for field, aliases in FIELD_ALIASES.items()
+        for alias in aliases
+        if alias != field
+    ):
+        # Already-canonical rows are the dominant snapshot shape.  Storage
+        # validation makes the defensive copy; nested rows are copied by
+        # their caller before an owner field is injected.
+        return row
     result = dict(row)
     for field, aliases in FIELD_ALIASES.items():
         if any(alias in row for alias in aliases):
@@ -78,6 +88,13 @@ def normalize_snapshot(value: Any) -> dict[str, list[dict[str, Any]]]:
             for index, row in enumerate(_rows(records, table))
         ]
     for index, account in enumerate(result["accounts"]):
+        if any(
+            alias in account
+            for table in ("services", "transactions")
+            for alias in COLLECTION_ALIASES[table]
+        ):
+            account = dict(account)
+            result["accounts"][index] = account
         for table in ("services", "transactions"):
             aliases = COLLECTION_ALIASES[table]
             if not any(alias in account for alias in aliases):
@@ -88,7 +105,7 @@ def normalize_snapshot(value: Any) -> dict[str, list[dict[str, Any]]]:
             if owner is None:
                 raise ValueError(f"accounts[{index}]: nested records require an account id")
             for nested_index, row in enumerate(nested):
-                item = _fields(row, f"{path}[{nested_index}]")
+                item = dict(_fields(row, f"{path}[{nested_index}]"))
                 if "accountId" in item:
                     raise ValueError(f"{path}[{nested_index}]: owner is already defined by nesting")
                 item["accountId"] = owner

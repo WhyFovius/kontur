@@ -1,10 +1,16 @@
 from __future__ import annotations
 
 import json
-import sqlite3
-from datetime import datetime
+from datetime import UTC, datetime
 from typing import Any
 
+from .database import (
+    Connection,
+    Row,
+    acquire_schema_lock,
+    mark_schema_ready,
+    schema_is_ready,
+)
 from .domain import RISK_THRESHOLDS, alert_candidates, customer_risk_state, iso, utcnow
 from .storage import db
 
@@ -12,7 +18,10 @@ _SEVERITY_RANK = {"critical": 0, "warning": 1, "info": 2}
 _MAX_NEW_ALERTS_PER_SYNC = 25
 
 
-def ensure_alert_tables(connection: sqlite3.Connection) -> None:
+def ensure_alert_tables(connection: Connection) -> None:
+    if schema_is_ready(connection, "alerts"):
+        return
+    acquire_schema_lock(connection)
     connection.executescript(
         """
         CREATE TABLE IF NOT EXISTS risk_events (
@@ -35,6 +44,12 @@ def ensure_alert_tables(connection: sqlite3.Connection) -> None:
             ON risk_events(episode_key) WHERE resolved_at IS NULL;
         CREATE INDEX IF NOT EXISTS risk_events_first_seen_idx
             ON risk_events(first_seen_at DESC, id DESC);
+        CREATE INDEX IF NOT EXISTS risk_events_unread_idx
+            ON risk_events(first_seen_at DESC, id DESC) WHERE read_at IS NULL;
+        CREATE INDEX IF NOT EXISTS risk_events_read_idx
+            ON risk_events(first_seen_at DESC, id DESC) WHERE read_at IS NOT NULL;
+        CREATE INDEX IF NOT EXISTS risk_events_customer_idx
+            ON risk_events(customer_id, id DESC);
         CREATE TABLE IF NOT EXISTS risk_monitor_state (
             id INTEGER PRIMARY KEY CHECK (id = 1),
             state TEXT NOT NULL,
@@ -42,12 +57,19 @@ def ensure_alert_tables(connection: sqlite3.Connection) -> None:
         );
         """
     )
+    mark_schema_ready(connection, "alerts")
 
 
-def _serialize(row: sqlite3.Row) -> dict[str, Any]:
-    try:
-        payload = json.loads(row["payload"] or "{}")
-    except (json.JSONDecodeError, TypeError):
+def _serialize(row: Row) -> dict[str, Any]:
+    raw_payload = row["payload"]
+    if isinstance(raw_payload, dict):
+        payload = raw_payload
+    else:
+        try:
+            payload = json.loads(raw_payload or "{}")
+        except (json.JSONDecodeError, TypeError):
+            payload = {}
+    if not isinstance(payload, dict):
         payload = {}
     return {
         "id": int(row["id"]),
@@ -76,7 +98,7 @@ def _serialize(row: sqlite3.Row) -> dict[str, Any]:
     }
 
 
-def _load_state(connection: sqlite3.Connection) -> dict[str, Any] | None:
+def _load_state(connection: Connection) -> dict[str, Any] | None:
     row = connection.execute(
         "SELECT state FROM risk_monitor_state WHERE id=1"
     ).fetchone()
@@ -90,7 +112,7 @@ def _load_state(connection: sqlite3.Connection) -> dict[str, Any] | None:
 
 
 def _save_state(
-    connection: sqlite3.Connection, state: dict[str, Any], now: datetime
+    connection: Connection, state: dict[str, Any], now: datetime
 ) -> None:
     connection.execute(
         "INSERT INTO risk_monitor_state (id, state, updated_at) VALUES (1, ?, ?) "
@@ -100,7 +122,7 @@ def _save_state(
 
 
 def _insert_event(
-    connection: sqlite3.Connection,
+    connection: Connection,
     *,
     episode_key: str,
     customer_id: str | None,
@@ -144,6 +166,31 @@ def _insert_event(
         "SELECT * FROM risk_events WHERE id=?", (cursor.lastrowid,)
     ).fetchone()
     return _serialize(row) if row else None
+
+
+def _event_matches(
+    existing: Row, candidate: dict[str, Any], payload_json: str
+) -> bool:
+    return (
+        str(existing["severity"]) == str(candidate["severity"])
+        and str(existing["title"]) == str(candidate["title"])
+        and str(existing["message"]) == str(candidate["message"])
+        and existing["score"] == candidate.get("score")
+        and int(existing["estimated_loss"] or 0)
+        == int(candidate.get("estimatedLoss") or 0)
+        and str(existing["payload"] or "{}") == payload_json
+    )
+
+
+def _last_seen_is_fresh(existing: Row, moment: datetime) -> bool:
+    try:
+        last_seen = datetime.fromisoformat(str(existing["last_seen_at"]))
+        if last_seen.tzinfo is None:
+            last_seen = last_seen.replace(tzinfo=UTC)
+        current = moment.replace(tzinfo=UTC) if moment.tzinfo is None else moment
+        return 0 <= (current - last_seen).total_seconds() < 60
+    except (TypeError, ValueError):
+        return False
 
 
 def sync_alerts(
@@ -194,6 +241,15 @@ def sync_alerts(
             }
             existing = active.get(episode)
             if existing is not None:
+                payload_json = json.dumps(payload, ensure_ascii=False)
+                if _event_matches(existing, candidate, payload_json):
+                    if _last_seen_is_fresh(existing, moment):
+                        continue
+                    connection.execute(
+                        "UPDATE risk_events SET last_seen_at=? WHERE id=?",
+                        (timestamp, existing["id"]),
+                    )
+                    continue
                 escalated = _SEVERITY_RANK.get(candidate["severity"], 9) < _SEVERITY_RANK.get(
                     str(existing["severity"]), 9
                 )
@@ -210,7 +266,7 @@ def sync_alerts(
                         candidate["message"],
                         candidate.get("score"),
                         int(candidate.get("estimatedLoss") or 0),
-                        json.dumps(payload, ensure_ascii=False),
+                        payload_json,
                         timestamp,
                         None if escalated else existing["read_at"],
                         existing["id"],
@@ -244,6 +300,9 @@ def sync_alerts(
 
         if previous:
             current_customers = current_state["customers"]
+            customers_by_id = {
+                str(customer["id"]): customer for customer in customers
+            }
             for customer_id, current in current_customers.items():
                 previous_customer = previous_customers.get(customer_id)
                 if not isinstance(previous_customer, dict):
@@ -254,10 +313,7 @@ def sync_alerts(
                     current_score, (int, float)
                 ):
                     continue
-                customer = next(
-                    (item for item in customers if str(item["id"]) == customer_id),
-                    None,
-                )
+                customer = customers_by_id.get(customer_id)
                 if customer is None:
                     continue
                 payload = {
@@ -342,7 +398,8 @@ def sync_alerts(
                 if event is not None:
                     inserted.append(event)
 
-        _save_state(connection, current_state, moment)
+        if previous != current_state:
+            _save_state(connection, current_state, moment)
 
     inserted.sort(
         key=lambda item: (
@@ -361,39 +418,36 @@ def list_notifications(
     with db() as connection:
         ensure_alert_tables(connection)
         if unread_only and read_only:
-            where = "WHERE 1=0"
+            condition = "1=0"
         elif unread_only:
-            where = "WHERE read_at IS NULL"
+            condition = "read_at IS NULL"
         elif read_only:
-            where = "WHERE read_at IS NOT NULL"
+            condition = "read_at IS NOT NULL"
         else:
-            where = ""
+            condition = "1=1"
+        where = "" if condition == "1=1" else f"WHERE {condition}"
         rows = connection.execute(
             f"SELECT * FROM risk_events {where} "
             "ORDER BY first_seen_at DESC, id DESC LIMIT ?",
             (bounded_limit,),
         ).fetchall()
-        total = int(
-            connection.execute(
-                f"SELECT COUNT(*) FROM risk_events {where}"
-            ).fetchone()[0]
-        )
-        unread = int(
-            connection.execute(
-                "SELECT COUNT(*) FROM risk_events WHERE read_at IS NULL"
-            ).fetchone()[0]
-        )
-        read = int(
-            connection.execute(
-                "SELECT COUNT(*) FROM risk_events WHERE read_at IS NOT NULL"
-            ).fetchone()[0]
-        )
-        critical = int(
-            connection.execute(
-                "SELECT COUNT(*) FROM risk_events "
-                "WHERE read_at IS NULL AND severity='critical' AND resolved_at IS NULL"
-            ).fetchone()[0]
-        )
+        counts = connection.execute(
+            f"""
+            SELECT
+                SUM(CASE WHEN {condition} THEN 1 ELSE 0 END) AS filtered_count,
+                SUM(CASE WHEN read_at IS NULL THEN 1 ELSE 0 END) AS unread_count,
+                SUM(CASE WHEN read_at IS NOT NULL THEN 1 ELSE 0 END) AS read_count,
+                SUM(
+                    CASE WHEN read_at IS NULL AND severity='critical'
+                         AND resolved_at IS NULL THEN 1 ELSE 0 END
+                ) AS critical_count
+            FROM risk_events
+            """
+        ).fetchone()
+        total = int(counts["filtered_count"] or 0)
+        unread = int(counts["unread_count"] or 0)
+        read = int(counts["read_count"] or 0)
+        critical = int(counts["critical_count"] or 0)
     return {
         "items": [_serialize(row) for row in rows],
         "total": total,
@@ -407,18 +461,18 @@ def list_notifications(
 def notification_counts() -> tuple[int, int]:
     with db() as connection:
         ensure_alert_tables(connection)
-        unread = int(
-            connection.execute(
-                "SELECT COUNT(*) FROM risk_events WHERE read_at IS NULL"
-            ).fetchone()[0]
-        )
-        critical = int(
-            connection.execute(
-                "SELECT COUNT(*) FROM risk_events "
-                "WHERE read_at IS NULL AND severity='critical' AND resolved_at IS NULL"
-            ).fetchone()[0]
-        )
-    return unread, critical
+        counts = connection.execute(
+            """
+            SELECT
+                SUM(CASE WHEN read_at IS NULL THEN 1 ELSE 0 END) AS unread_count,
+                SUM(
+                    CASE WHEN read_at IS NULL AND severity='critical'
+                         AND resolved_at IS NULL THEN 1 ELSE 0 END
+                ) AS critical_count
+            FROM risk_events
+            """
+        ).fetchone()
+    return int(counts["unread_count"] or 0), int(counts["critical_count"] or 0)
 
 
 def mark_notification_read(notification_id: int) -> dict[str, Any] | None:

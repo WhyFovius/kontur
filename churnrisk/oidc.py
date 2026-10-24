@@ -18,10 +18,12 @@ from __future__ import annotations
 
 import base64
 import hashlib
+import json
 import os
 import secrets
 import time
 from dataclasses import dataclass, field
+from threading import Lock
 from typing import Any
 from urllib.parse import urlencode
 
@@ -74,52 +76,79 @@ def code_challenge(verifier: str) -> str:
 
 _DISCOVERY_CACHE: dict[str, tuple[float, dict[str, Any]]] = {}
 _DISCOVERY_TTL_SECONDS = 300.0
+_DISCOVERY_LOCK = Lock()
+_JWK_CLIENTS: dict[str, Any] = {}
+_JWK_CLIENTS_LOCK = Lock()
+_MAX_OIDC_RESPONSE_BYTES = 1_000_000
+
+
+def _http_json(
+    method: str,
+    url: str,
+    *,
+    form: dict[str, str] | None = None,
+    follow_redirects: bool = False,
+    error_message: str,
+) -> dict[str, Any]:
+    try:
+        import httpx
+    except ImportError as error:  # pragma: no cover - depends on env
+        raise OidcError("OIDC требует установленный httpx") from error
+    try:
+        with httpx.stream(
+            method,
+            url,
+            data=form,
+            timeout=5.0,
+            follow_redirects=follow_redirects,
+        ) as response:
+            response.raise_for_status()
+            content = bytearray()
+            for chunk in response.iter_bytes():
+                content.extend(chunk)
+                if len(content) > _MAX_OIDC_RESPONSE_BYTES:
+                    raise OidcError("OIDC провайдер вернул слишком большой ответ")
+            payload = json.loads(content)
+    except OidcError:
+        raise
+    except Exception as error:
+        raise OidcError(error_message) from error
+    if not isinstance(payload, dict):
+        raise OidcError("OIDC провайдер вернул некорректный ответ")
+    return payload
 
 
 def _http_get_json(url: str) -> dict[str, Any]:
-    try:
-        import httpx
-    except ImportError as error:  # pragma: no cover - depends on env
-        raise OidcError("OIDC требует установленный httpx") from error
-    try:
-        response = httpx.get(url, timeout=5.0, follow_redirects=True)
-        response.raise_for_status()
-        payload = response.json()
-    except Exception as error:
-        raise OidcError("OIDC провайдер недоступен") from error
-    if not isinstance(payload, dict):
-        raise OidcError("OIDC провайдер вернул некорректный ответ")
-    return payload
+    return _http_json(
+        "GET",
+        url,
+        follow_redirects=True,
+        error_message="OIDC провайдер недоступен",
+    )
 
 
 def _http_post_form(url: str, form: dict[str, str]) -> dict[str, Any]:
-    try:
-        import httpx
-    except ImportError as error:  # pragma: no cover - depends on env
-        raise OidcError("OIDC требует установленный httpx") from error
-    try:
-        response = httpx.post(url, data=form, timeout=5.0)
-        response.raise_for_status()
-        payload = response.json()
-    except Exception as error:
-        raise OidcError("Обмен кода авторизации не удался") from error
-    if not isinstance(payload, dict):
-        raise OidcError("OIDC провайдер вернул некорректный ответ")
-    return payload
+    return _http_json(
+        "POST",
+        url,
+        form=form,
+        error_message="Обмен кода авторизации не удался",
+    )
 
 
 def discover(issuer: str) -> dict[str, Any]:
     """Fetch and briefly cache the issuer discovery document."""
-    now = time.monotonic()
-    cached = _DISCOVERY_CACHE.get(issuer)
-    if cached and now - cached[0] < _DISCOVERY_TTL_SECONDS:
-        return cached[1]
-    document = _http_get_json(f"{issuer}/.well-known/openid-configuration")
-    for key in ("authorization_endpoint", "token_endpoint", "jwks_uri"):
-        if not document.get(key):
-            raise OidcError(f"В discovery-документе отсутствует {key}")
-    _DISCOVERY_CACHE[issuer] = (now, document)
-    return document
+    with _DISCOVERY_LOCK:
+        now = time.monotonic()
+        cached = _DISCOVERY_CACHE.get(issuer)
+        if cached and now - cached[0] < _DISCOVERY_TTL_SECONDS:
+            return cached[1]
+        document = _http_get_json(f"{issuer}/.well-known/openid-configuration")
+        for key in ("authorization_endpoint", "token_endpoint", "jwks_uri"):
+            if not document.get(key):
+                raise OidcError(f"В discovery-документе отсутствует {key}")
+        _DISCOVERY_CACHE[issuer] = (time.monotonic(), document)
+        return document
 
 
 def build_authorize_url(
@@ -144,6 +173,21 @@ def build_authorize_url(
     return f"{discovery['authorization_endpoint']}?{urlencode(params)}"
 
 
+def _jwk_client(jwks_uri: str) -> Any:
+    with _JWK_CLIENTS_LOCK:
+        client = _JWK_CLIENTS.get(jwks_uri)
+        if client is None:
+            import jwt
+
+            client = jwt.PyJWKClient(
+                jwks_uri,
+                cache_keys=True,
+                lifespan=int(_DISCOVERY_TTL_SECONDS),
+            )
+            _JWK_CLIENTS[jwks_uri] = client
+        return client
+
+
 def _verify_id_token(
     id_token: str,
     config: OidcConfig,
@@ -154,7 +198,7 @@ def _verify_id_token(
     except ImportError as error:  # pragma: no cover - depends on env
         raise OidcError("OIDC требует установленный PyJWT") from error
     try:
-        jwk_client = jwt.PyJWKClient(str(discovery["jwks_uri"]))
+        jwk_client = _jwk_client(str(discovery["jwks_uri"]))
         signing_key = jwk_client.get_signing_key_from_jwt(id_token)
         claims = jwt.decode(
             id_token,

@@ -7,11 +7,12 @@ import json
 import logging
 import os
 import secrets
-import sqlite3
 import time
 from contextlib import asynccontextmanager
+from dataclasses import dataclass, field
 from datetime import datetime, timedelta
-from threading import RLock
+from decimal import Decimal, InvalidOperation
+from threading import Lock, RLock, Thread
 from typing import Any, Literal
 
 from fastapi import Depends, FastAPI, HTTPException, Query, Request, Response, Security
@@ -29,6 +30,7 @@ from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
 from . import oidc as oidc_service
 from .alerts import (
+    ensure_alert_tables,
     events_after,
     latest_event_id,
     list_notifications,
@@ -39,16 +41,27 @@ from .alerts import (
     sync_alerts,
 )
 from .config import (
+    ANALYSIS_CACHE_TTL_SECONDS,
     MAX_SNAPSHOT_BYTES,
     SESSION_DAYS,
     STATIC_DIR,
     TEMPLATES_DIR,
 )
+from .database import (
+    DatabaseError,
+    checkpoint_database,
+    close_database_pools,
+)
+from .database import (
+    database_healthcheck as _database_healthcheck,
+)
 from .domain import (
     DEFAULT_WEIGHTS,
     FEATURE_LABELS,
     RISK_THRESHOLDS,
-    analyze,
+    ServiceFact,
+    TransactionFact,
+    analyze_prepared,
     churn_timeline,
     iso,
     rescue_queue,
@@ -57,6 +70,7 @@ from .domain import (
 )
 from .realtime import (
     customer_realtime_history,
+    ensure_realtime_tables,
     latest_realtime_event_id,
     list_reaction_outbox,
     list_reaction_templates,
@@ -108,7 +122,7 @@ from .storage import (
     db,
     get_weights,
     init_db,
-    load_source,
+    load_prepared_source,
     login_rate_limited,
     record_login_failure,
     replace_snapshot,
@@ -119,10 +133,42 @@ logger = logging.getLogger("churnrisk")
 session_cookie = APIKeyCookie(
     name="churn_session", auto_error=False, scheme_name="AdminSession"
 )
-_analysis_cache_lock = RLock()
-_analysis_cache: (
-    tuple[tuple[int, int], float, list[dict[str, Any]], dict[str, Any]] | None
-) = None
+PreparedSource = tuple[
+    list[dict[str, Any]],
+    dict[str, tuple[list[dict[str, Any]], list[ServiceFact]]],
+    dict[str, TransactionFact],
+]
+
+
+@dataclass
+class _AnalysisCacheEntry:
+    key: tuple[int, int]
+    computed_at: float
+    generated_at: datetime
+    customers: list[dict[str, Any]]
+    aggregate: dict[str, Any]
+    weights: dict[str, float]
+    by_id: dict[str, dict[str, Any]] = field(init=False)
+    _timeline: dict[str, Any] | None = field(default=None, init=False, repr=False)
+    _rescue_cache: dict[tuple[int, int], dict[str, Any]] = field(
+        default_factory=dict, init=False, repr=False
+    )
+    _sorted_cache: dict[tuple[str, str, str], list[dict[str, Any]]] = field(
+        default_factory=dict, init=False, repr=False
+    )
+    _derived_lock: RLock = field(default_factory=RLock, init=False, repr=False)
+
+    def __post_init__(self) -> None:
+        self.by_id = {str(customer["id"]): customer for customer in self.customers}
+
+
+_analysis_state_lock = RLock()
+_analysis_compute_lock = Lock()
+_analysis_cache: _AnalysisCacheEntry | None = None
+_prepared_cache_lock = RLock()
+_prepared_cache: tuple[int, PreparedSource] | None = None
+_analysis_refresh_lock = Lock()
+_analysis_refresh_running = False
 
 
 class RequestSizeLimitMiddleware:
@@ -219,6 +265,7 @@ class SecurityHeadersMiddleware:
                         ),
                     ]
                 )
+                status = int(message.get("status", 0))
                 if path.startswith("/api/v1/") or path in {"/", "/login", "/metrics"}:
                     response_headers.extend(
                         [
@@ -226,20 +273,49 @@ class SecurityHeadersMiddleware:
                             (b"pragma", b"no-cache"),
                         ]
                     )
+                elif 200 <= status < 300 and path.startswith("/static/app/assets/"):
+                    # Vite emits content-hashed filenames below this prefix.
+                    response_headers.append(
+                        (
+                            b"cache-control",
+                            b"public, max-age=31536000, immutable",
+                        )
+                    )
+                elif 200 <= status < 300 and path.startswith(
+                    ("/static/fonts/", "/static/vendor/")
+                ):
+                    response_headers.append(
+                        (b"cache-control", b"public, max-age=604800")
+                    )
                 message["headers"] = response_headers
             await send(message)
 
         await self.app(scope, receive, send_with_headers)
 
 
+def _initialize_database() -> None:
+    init_db()
+    with db() as connection:
+        ensure_alert_tables(connection)
+        ensure_realtime_tables(connection)
+
+
 @asynccontextmanager
 async def lifespan(_: FastAPI):
-    init_db()
+    await asyncio.to_thread(_initialize_database)
     if not os.getenv("ADMIN_PASSWORD"):
         logger.warning(
             "ADMIN_PASSWORD is not configured; login will remain unavailable"
         )
-    yield
+    try:
+        yield
+    finally:
+        await asyncio.to_thread(demo_simulator.stop)
+        try:
+            await asyncio.to_thread(checkpoint_database)
+        except DatabaseError:
+            logger.warning("Database checkpoint failed during shutdown", exc_info=True)
+        close_database_pools()
 
 
 app = FastAPI(
@@ -266,7 +342,7 @@ async def swagger_docs():
     )
 
 
-async def _username_for_token(token: str | None) -> str:
+def _username_for_token_sync(token: str | None) -> str:
     if not token:
         raise HTTPException(status_code=401, detail="Требуется вход")
     token_hash = hashlib.sha256(token.encode("utf-8")).hexdigest()
@@ -283,7 +359,11 @@ async def _username_for_token(token: str | None) -> str:
     return str(row["username"])
 
 
-def _basic_auth_username(request: Request) -> str | None:
+async def _username_for_token(token: str | None) -> str:
+    return await asyncio.to_thread(_username_for_token_sync, token)
+
+
+async def _basic_auth_username(request: Request) -> str | None:
     """Optional HTTP Basic fallback (API clients, collectors).
 
     Returns the admin name when a valid ``Authorization: Basic`` header
@@ -302,7 +382,7 @@ def _basic_auth_username(request: Request) -> str | None:
         raise HTTPException(
             status_code=401, detail="Некорректный заголовок Basic-авторизации"
         ) from None
-    if not verify_admin(username, password):
+    if not await asyncio.to_thread(verify_admin, username, password):
         raise HTTPException(status_code=401, detail="Неверный логин или пароль")
     return os.getenv("ADMIN_USERNAME", "admin").strip()
 
@@ -310,7 +390,7 @@ def _basic_auth_username(request: Request) -> str | None:
 async def current_user(
     request: Request, token: str | None = Security(session_cookie)
 ) -> str:
-    basic_username = _basic_auth_username(request)
+    basic_username = await _basic_auth_username(request)
     if basic_username is not None:
         return basic_username
     return await _username_for_token(token)
@@ -357,28 +437,206 @@ def _sync_realtime_alerts(
         logger.exception("Realtime risk monitor sync failed")
 
 
-def _analyzed_data() -> tuple[list[dict[str, Any]], dict[str, Any]]:
-    global _analysis_cache
+def _read_analysis_versions() -> tuple[int, int]:
     with db() as connection:
         versions = connection.execute(
             "SELECT key, value FROM metadata WHERE key IN ('snapshot_version', 'model_version')"
         ).fetchall()
-        version_map = {row["key"]: int(row["value"]) for row in versions}
-        cache_key = (
-            version_map.get("snapshot_version", 0),
-            version_map.get("model_version", 0),
-        )
-        now = time.monotonic()
-        with _analysis_cache_lock:
+    version_map = {row["key"]: int(row["value"]) for row in versions}
+    return (
+        version_map.get("snapshot_version", 0),
+        version_map.get("model_version", 0),
+    )
+
+
+def _prepared_source(snapshot_version: int) -> PreparedSource:
+    global _prepared_cache
+    with _prepared_cache_lock:
+        cached = _prepared_cache
+        if cached is not None and cached[0] == snapshot_version:
+            return cached[1]
+        with db() as connection:
+            source = load_prepared_source(connection)
+        _prepared_cache = (snapshot_version, source)
+        return source
+
+
+def _compute_analysis(
+    key: tuple[int, int], *, refresh_after: float | None = None
+) -> _AnalysisCacheEntry:
+    global _analysis_cache
+    with _analysis_compute_lock:
+        with _analysis_state_lock:
             cached = _analysis_cache
-            if cached and cached[0] == cache_key and now - cached[1] < 10:
-                return cached[2], cached[3]
-        customers = analyze(load_source(connection), get_weights(connection))
-    aggregate = summary(customers)
-    with _analysis_cache_lock:
-        _analysis_cache = (cache_key, now, customers, aggregate)
-    _sync_realtime_alerts(customers, aggregate)
-    return customers, aggregate
+        if (
+            cached is not None
+            and cached.key == key
+            and (refresh_after is None or cached.computed_at > refresh_after)
+        ):
+            return cached
+
+        if refresh_after is not None:
+            # A background refresh can be queued behind a synchronous
+            # snapshot/weight change.  Never let that now-obsolete key
+            # overwrite the newer entry; refresh the current version instead.
+            current_key = _read_analysis_versions()
+            if current_key != key:
+                if cached is not None and cached.key == current_key:
+                    return cached
+                key = current_key
+
+        accounts, services_by_account, transactions_by_account = _prepared_source(
+            key[0]
+        )
+        with db() as connection:
+            weights = get_weights(connection)
+        generated_at = utcnow()
+        customers = analyze_prepared(
+            accounts,
+            services_by_account,
+            transactions_by_account,
+            weights,
+            now=generated_at,
+        )
+        aggregate = summary(customers, now=generated_at)
+        entry = _AnalysisCacheEntry(
+            key=key,
+            computed_at=time.monotonic(),
+            generated_at=generated_at,
+            customers=customers,
+            aggregate=aggregate,
+            weights=dict(weights),
+        )
+        with _analysis_state_lock:
+            _analysis_cache = entry
+        _sync_realtime_alerts(customers, aggregate)
+        return entry
+
+
+def _refresh_analysis(key: tuple[int, int], refresh_after: float) -> None:
+    global _analysis_refresh_running
+    try:
+        _compute_analysis(key, refresh_after=refresh_after)
+    except Exception:
+        logger.exception("Background analysis refresh failed")
+    finally:
+        with _analysis_refresh_lock:
+            _analysis_refresh_running = False
+
+
+def _schedule_analysis_refresh(key: tuple[int, int], refresh_after: float) -> None:
+    global _analysis_refresh_running
+    with _analysis_refresh_lock:
+        if _analysis_refresh_running:
+            return
+        _analysis_refresh_running = True
+    try:
+        Thread(
+            target=_refresh_analysis,
+            args=(key, refresh_after),
+            daemon=True,
+            name="kontur-analysis-refresh",
+        ).start()
+    except RuntimeError:
+        with _analysis_refresh_lock:
+            _analysis_refresh_running = False
+        logger.warning("Could not start the background analysis refresh", exc_info=True)
+
+
+def _analysis_entry() -> _AnalysisCacheEntry:
+    key = _read_analysis_versions()
+    with _analysis_state_lock:
+        cached = _analysis_cache
+    if cached is not None and cached.key == key:
+        if time.monotonic() - cached.computed_at < ANALYSIS_CACHE_TTL_SECONDS:
+            return cached
+        # Time-dependent rules need periodic refresh, but callers can use
+        # the last complete portfolio while one background worker rebuilds it.
+        _schedule_analysis_refresh(key, cached.computed_at)
+        return cached
+    return _compute_analysis(key)
+
+
+def _analyzed_data() -> tuple[list[dict[str, Any]], dict[str, Any]]:
+    entry = _analysis_entry()
+    return entry.customers, entry.aggregate
+
+
+async def _analysis_entry_async() -> _AnalysisCacheEntry:
+    return await asyncio.to_thread(_analysis_entry)
+
+
+def _timeline_for(entry: _AnalysisCacheEntry) -> dict[str, Any]:
+    with entry._derived_lock:
+        if entry._timeline is None:
+            entry._timeline = churn_timeline(entry.customers, now=entry.generated_at)
+        return entry._timeline
+
+
+def _rescue_queue_for(
+    entry: _AnalysisCacheEntry, *, limit: int, minimum_score: int
+) -> dict[str, Any]:
+    cache_key = (limit, minimum_score)
+    with entry._derived_lock:
+        cached = entry._rescue_cache.get(cache_key)
+        if cached is None:
+            cached = rescue_queue(
+                entry.customers,
+                weights=entry.weights,
+                now=entry.generated_at,
+                limit=limit,
+                minimum_score=minimum_score,
+            )
+            if len(entry._rescue_cache) >= 16:
+                entry._rescue_cache.clear()
+            entry._rescue_cache[cache_key] = cached
+        return cached
+
+
+def _customer_sort_key(customer: dict[str, Any], sort: str) -> Any:
+    value = customer[sort]
+    if sort == "id":
+        try:
+            return (0, Decimal(str(value)))
+        except InvalidOperation:
+            return (1, str(value).casefold())
+    if sort == "email":
+        return str(value).casefold()
+    return value if value is not None else 0
+
+
+def _sorted_customers_for(
+    entry: _AnalysisCacheEntry,
+    *,
+    risk: str | None,
+    sort: str,
+    order: str,
+) -> list[dict[str, Any]]:
+    cache_key = (risk or "", sort, order)
+    with entry._derived_lock:
+        cached = entry._sorted_cache.get(cache_key)
+        if cached is not None:
+            return cached
+        items = (
+            entry.customers
+            if risk is None
+            else [
+                customer
+                for customer in entry.customers
+                if customer["riskLevel"] == risk
+            ]
+        )
+        rated = [customer for customer in items if customer[sort] is not None]
+        unrated = [customer for customer in items if customer[sort] is None]
+        rated.sort(
+            key=lambda customer: _customer_sort_key(customer, sort),
+            reverse=order == "desc",
+        )
+        sorted_items = rated + unrated
+        if len(entry._sorted_cache) >= 8:
+            entry._sorted_cache.clear()
+        entry._sorted_cache[cache_key] = sorted_items
+        return sorted_items
 
 
 def _frontend_response(legacy_path) -> FileResponse:
@@ -449,6 +707,31 @@ def _oidc_redirect_uri(request: Request, config) -> str:
     return config.redirect_uri or str(request.url_for("oidc_callback"))
 
 
+def _store_oidc_state(
+    state_hash: str, nonce: str, verifier: str, expires_at: datetime
+) -> None:
+    with db() as connection:
+        connection.execute(
+            "DELETE FROM oidc_states WHERE expires_at < ?", (iso(utcnow()),)
+        )
+        connection.execute(
+            "INSERT INTO oidc_states (state_hash, nonce, code_verifier, expires_at)"
+            " VALUES (?, ?, ?, ?)",
+            (state_hash, nonce, verifier, iso(expires_at)),
+        )
+
+
+def _pop_oidc_state(state_hash: str):
+    with db() as connection:
+        row = connection.execute(
+            "SELECT nonce, code_verifier, expires_at FROM oidc_states"
+            " WHERE state_hash=?",
+            (state_hash,),
+        ).fetchone()
+        connection.execute("DELETE FROM oidc_states WHERE state_hash=?", (state_hash,))
+    return row
+
+
 @app.get("/api/v1/auth/providers", response_model=AuthProvidersResponse)
 async def auth_providers():
     """Public: which login methods the panel should offer."""
@@ -469,7 +752,7 @@ async def oidc_login(request: Request):
     if config is None:
         raise HTTPException(status_code=503, detail="OIDC не настроен")
     try:
-        discovery = oidc_service.discover(config.issuer)
+        discovery = await asyncio.to_thread(oidc_service.discover, config.issuer)
     except oidc_service.OidcError:
         raise HTTPException(
             status_code=502, detail="OIDC провайдер недоступен"
@@ -478,20 +761,13 @@ async def oidc_login(request: Request):
     nonce = secrets.token_urlsafe(32)
     verifier = oidc_service.code_verifier()
     expires_at = utcnow() + timedelta(minutes=10)
-    with db() as connection:
-        connection.execute(
-            "DELETE FROM oidc_states WHERE expires_at < ?", (iso(utcnow()),)
-        )
-        connection.execute(
-            "INSERT INTO oidc_states (state_hash, nonce, code_verifier, expires_at)"
-            " VALUES (?, ?, ?, ?)",
-            (
-                hashlib.sha256(state.encode("utf-8")).hexdigest(),
-                nonce,
-                verifier,
-                iso(expires_at),
-            ),
-        )
+    await asyncio.to_thread(
+        _store_oidc_state,
+        hashlib.sha256(state.encode("utf-8")).hexdigest(),
+        nonce,
+        verifier,
+        expires_at,
+    )
     url = oidc_service.build_authorize_url(
         config,
         discovery,
@@ -516,18 +792,13 @@ async def oidc_callback(
     if error or not code or not state:
         return RedirectResponse("/login?oidc_error=1", status_code=303)
     state_hash = hashlib.sha256(state.encode("utf-8")).hexdigest()
-    with db() as connection:
-        row = connection.execute(
-            "SELECT nonce, code_verifier, expires_at FROM oidc_states"
-            " WHERE state_hash=?",
-            (state_hash,),
-        ).fetchone()
-        connection.execute("DELETE FROM oidc_states WHERE state_hash=?", (state_hash,))
+    row = await asyncio.to_thread(_pop_oidc_state, state_hash)
     if row is None or datetime.fromisoformat(row["expires_at"]) <= utcnow():
         return RedirectResponse("/login?oidc_error=1", status_code=303)
     try:
-        discovery = oidc_service.discover(config.issuer)
-        claims = oidc_service.exchange_and_verify(
+        discovery = await asyncio.to_thread(oidc_service.discover, config.issuer)
+        claims = await asyncio.to_thread(
+            oidc_service.exchange_and_verify,
             config,
             discovery,
             code=code,
@@ -541,7 +812,7 @@ async def oidc_callback(
     except oidc_service.OidcError:
         logger.warning("OIDC callback rejected", exc_info=True)
         return RedirectResponse("/login?oidc_error=1", status_code=303)
-    token, _expires = _create_session(username)
+    token, _expires = await asyncio.to_thread(_create_session, username)
     response = RedirectResponse("/", status_code=303)
     _set_session_cookie(response, token)
     return response
@@ -551,7 +822,7 @@ async def oidc_callback(
 async def login(payload: LoginRequest, request: Request, response: Response):
     remote_host = request.client.host if request.client else "unknown"
     rate_key = hashlib.sha256(remote_host.encode("utf-8")).hexdigest()
-    limited, retry_after = login_rate_limited(rate_key)
+    limited, retry_after = await asyncio.to_thread(login_rate_limited, rate_key)
     if limited:
         raise HTTPException(
             status_code=429,
@@ -559,13 +830,15 @@ async def login(payload: LoginRequest, request: Request, response: Response):
             headers={"Retry-After": str(retry_after)},
         )
 
-    if not verify_admin(payload.username, payload.password):
-        record_login_failure(rate_key)
+    if not await asyncio.to_thread(
+        verify_admin, payload.username, payload.password
+    ):
+        await asyncio.to_thread(record_login_failure, rate_key)
         raise HTTPException(status_code=401, detail="Неверный логин или пароль")
 
-    clear_login_failures(rate_key)
+    await asyncio.to_thread(clear_login_failures, rate_key)
     username = os.getenv("ADMIN_USERNAME", "admin").strip()
-    token, expires_at = _create_session(username)
+    token, expires_at = await asyncio.to_thread(_create_session, username)
     _set_session_cookie(response, token)
     return {"username": username, "expiresAt": iso(expires_at)}
 
@@ -575,14 +848,18 @@ async def me(username: str = Depends(current_user)):
     return {"username": username}
 
 
-@app.post("/api/v1/auth/logout")
-async def logout(response: Response, request: Request, _: str = Depends(current_user)):
-    token = request.cookies.get("churn_session", "")
+def _delete_session(token: str) -> None:
     with db() as connection:
         connection.execute(
             "DELETE FROM sessions WHERE token_hash=?",
             (hashlib.sha256(token.encode("utf-8")).hexdigest(),),
         )
+
+
+@app.post("/api/v1/auth/logout")
+async def logout(response: Response, request: Request, _: str = Depends(current_user)):
+    token = request.cookies.get("churn_session", "")
+    await asyncio.to_thread(_delete_session, token)
     response.delete_cookie("churn_session", path="/")
     return {"ok": True}
 
@@ -596,27 +873,14 @@ async def customers(
     offset: int = Query(default=0, ge=0),
     _: str = Depends(current_user),
 ):
-    items, _ = _analyzed_data()
-    if risk is not None:
-        items = [customer for customer in items if customer["riskLevel"] == risk]
-
-    def key(customer: dict[str, Any]) -> Any:
-        value = customer[sort]
-        if sort == "id":
-            from decimal import Decimal, InvalidOperation
-
-            try:
-                return (0, Decimal(str(value)))
-            except InvalidOperation:
-                return (1, str(value).casefold())
-        if sort == "email":
-            return str(value).casefold()
-        return value if value is not None else 0
-
-    rated = [customer for customer in items if customer[sort] is not None]
-    unrated = [customer for customer in items if customer[sort] is None]
-    rated.sort(key=key, reverse=order == "desc")
-    sorted_items = rated + unrated
+    entry = await _analysis_entry_async()
+    sorted_items = await asyncio.to_thread(
+        _sorted_customers_for,
+        entry,
+        risk=risk,
+        sort=sort,
+        order=order,
+    )
     page = [
         _public_customer(customer) for customer in sorted_items[offset : offset + limit]
     ]
@@ -625,25 +889,25 @@ async def customers(
 
 @app.get("/api/v1/customers/{customer_id}", response_model=CustomerResponse)
 async def customer_detail(customer_id: str, _: str = Depends(current_user)):
-    items, _ = _analyzed_data()
-    for customer in items:
-        if customer["id"] == customer_id:
-            return _public_customer(customer)
-    raise HTTPException(status_code=404, detail="Клиент не найден")
+    entry = await _analysis_entry_async()
+    customer = entry.by_id.get(customer_id)
+    if customer is None:
+        raise HTTPException(status_code=404, detail="Клиент не найден")
+    return _public_customer(customer)
 
 
 @app.get("/api/v1/analytics/summary", response_model=AnalyticsSummary)
 async def analytics_summary(_: str = Depends(current_user)):
-    _, data = _analyzed_data()
-    return {**data, "currency": "EUR", "unit": "eurocents"}
+    entry = await _analysis_entry_async()
+    return {**entry.aggregate, "currency": "EUR", "unit": "eurocents"}
 
 
 @app.get(
     "/api/v1/analytics/churn-timeline", response_model=ChurnTimelineResponse
 )
 async def analytics_churn_timeline(_: str = Depends(current_user)):
-    customers, _data = _analyzed_data()
-    return churn_timeline(customers)
+    entry = await _analysis_entry_async()
+    return await asyncio.to_thread(_timeline_for, entry)
 
 
 @app.get("/api/v1/analytics/rescue-queue", response_model=RescueQueueResponse)
@@ -652,11 +916,12 @@ async def analytics_rescue_queue(
     minimum_score: int = Query(default=65, ge=0, le=100),
     _: str = Depends(current_user),
 ):
-    customers, _data = _analyzed_data()
-    with db() as connection:
-        weights = get_weights(connection)
-    return rescue_queue(
-        customers, weights=weights, limit=limit, minimum_score=minimum_score
+    entry = await _analysis_entry_async()
+    return await asyncio.to_thread(
+        _rescue_queue_for,
+        entry,
+        limit=limit,
+        minimum_score=minimum_score,
     )
 
 
@@ -669,9 +934,12 @@ async def get_notifications(
 ):
     # Touch the analysis first so a cold panel sees the monitor's current
     # episodes instead of an empty table until some other endpoint runs.
-    _analyzed_data()
-    return list_notifications(
-        limit=limit, unread_only=unread_only, read_only=read_only
+    await _analysis_entry_async()
+    return await asyncio.to_thread(
+        list_notifications,
+        limit=limit,
+        unread_only=unread_only,
+        read_only=read_only,
     )
 
 
@@ -679,8 +947,8 @@ async def get_notifications(
     "/api/v1/notifications/read-all", response_model=NotificationReadResponse
 )
 async def read_all_notifications(_: str = Depends(current_user)):
-    updated = mark_all_notifications_read()
-    unread, _critical = notification_counts()
+    updated = await asyncio.to_thread(mark_all_notifications_read)
+    unread, _critical = await asyncio.to_thread(notification_counts)
     return {"ok": True, "updatedCount": updated, "unreadCount": unread}
 
 
@@ -691,10 +959,12 @@ async def read_all_notifications(_: str = Depends(current_user)):
 async def read_notification(
     notification_id: int, _: str = Depends(current_user)
 ):
-    notification = mark_notification_read(notification_id)
+    notification = await asyncio.to_thread(
+        mark_notification_read, notification_id
+    )
     if notification is None:
         raise HTTPException(status_code=404, detail="Уведомление не найдено")
-    unread, _critical = notification_counts()
+    unread, _critical = await asyncio.to_thread(notification_counts)
     return {
         "ok": True,
         "notification": notification,
@@ -710,10 +980,12 @@ async def read_notification(
 async def unread_notification(
     notification_id: int, _: str = Depends(current_user)
 ):
-    notification = mark_notification_unread(notification_id)
+    notification = await asyncio.to_thread(
+        mark_notification_unread, notification_id
+    )
     if notification is None:
         raise HTTPException(status_code=404, detail="Уведомление не найдено")
-    unread, _critical = notification_counts()
+    unread, _critical = await asyncio.to_thread(notification_counts)
     return {
         "ok": True,
         "notification": notification,
@@ -773,19 +1045,19 @@ async def events_stream(request: Request, _: str = Depends(current_user)):
 
 @app.get("/api/v1/realtime/status", response_model=RealtimeStatusResponse)
 async def get_realtime_status(_: str = Depends(current_user)):
-    customers, _data = _analyzed_data()
-    return await asyncio.to_thread(realtime_status, customers)
+    entry = await _analysis_entry_async()
+    return await asyncio.to_thread(realtime_status, entry.customers)
 
 
 @app.post("/api/v1/demo/generate", response_model=RealtimeEvent)
 async def generate_demo_event(
     payload: DemoGenerateRequest, _: str = Depends(current_user)
 ):
-    customers, _data = _analyzed_data()
+    entry = await _analysis_entry_async()
     try:
         return await asyncio.to_thread(
             process_demo_event,
-            customers,
+            entry.customers,
             scenario=payload.scenario,
             customer_id=payload.customerId,
             event_id=payload.eventId,
@@ -819,7 +1091,8 @@ async def start_demo_simulator(
     "/api/v1/demo/simulator/stop", response_model=SimulatorActionResponse
 )
 async def stop_demo_simulator(_: str = Depends(current_user)):
-    return {"ok": True, "simulator": demo_simulator.stop()}
+    # stop() briefly joins the simulator thread; keep that wait off the loop.
+    return {"ok": True, "simulator": await asyncio.to_thread(demo_simulator.stop)}
 
 
 @app.post("/api/v1/demo/reset", response_model=DemoResetResponse)
@@ -872,8 +1145,8 @@ async def get_realtime_dashboard(
     hours: int = Query(default=24, ge=1, le=720),
     _: str = Depends(current_user),
 ):
-    customers, _data = _analyzed_data()
-    return await asyncio.to_thread(realtime_dashboard, customers, hours)
+    entry = await _analysis_entry_async()
+    return await asyncio.to_thread(realtime_dashboard, entry.customers, hours)
 
 
 @app.get(
@@ -962,10 +1235,28 @@ async def realtime_stream(
     )
 
 
+def _get_weights_sync() -> dict[str, float]:
+    with db() as connection:
+        return get_weights(connection)
+
+
+def _update_weights_sync(weights: dict[str, float]) -> dict[str, float]:
+    with db() as connection:
+        return update_weights(connection, weights)
+
+
+def _replace_snapshot_sync(payload: SnapshotRequest) -> int:
+    with db() as connection:
+        return replace_snapshot(
+            connection,
+            payload.model_dump(),
+            already_normalized=True,
+        )
+
+
 @app.get("/api/v1/model/settings", response_model=ModelSettingsResponse)
 async def get_settings(_: str = Depends(current_user)):
-    with db() as connection:
-        weights = get_weights(connection)
+    weights = await asyncio.to_thread(_get_weights_sync)
     return {
         "weights": weights,
         "features": FEATURE_LABELS,
@@ -982,8 +1273,7 @@ async def patch_settings(payload: SettingsPatch, _: str = Depends(current_user))
             status_code=422,
             detail=f"Неизвестные признаки: {', '.join(sorted(unknown))}",
         )
-    with db() as connection:
-        weights = update_weights(connection, payload.weights)
+    weights = await asyncio.to_thread(_update_weights_sync, payload.weights)
     return {
         "weights": weights,
         "features": FEATURE_LABELS,
@@ -995,18 +1285,18 @@ async def patch_settings(payload: SettingsPatch, _: str = Depends(current_user))
 @app.put("/api/v1/source/snapshot", response_model=SnapshotResponse)
 async def put_snapshot(payload: SnapshotRequest, _: str = Depends(current_user)):
     try:
-        with db() as connection:
-            count = replace_snapshot(connection, payload.model_dump())
+        count = await asyncio.to_thread(_replace_snapshot_sync, payload)
     except SnapshotValidationError as error:
         raise HTTPException(status_code=422, detail=str(error)) from error
     logger.info("Source snapshot replaced; accounts=%s", count)
     return {"ok": True, "accountCount": count}
 
 
-@app.get("/metrics", response_class=PlainTextResponse)
-async def metrics():
-    customers, data = _analyzed_data()
-    timeline = churn_timeline(customers)
+def _metrics_text() -> str:
+    entry = _analysis_entry()
+    customers = entry.customers
+    data = entry.aggregate
+    timeline = _timeline_for(entry)
     timeline_totals = timeline["totals"]
     rated_scores = [
         customer["score"] for customer in customers if customer["score"] is not None
@@ -1015,10 +1305,9 @@ async def metrics():
         sum(rated_scores) / len(rated_scores) if rated_scores else 0.0
     )
     unread_alerts, critical_alerts = notification_counts()
-    with db() as connection:
-        rescue_totals = rescue_queue(
-            customers, weights=get_weights(connection), limit=1000
-        )["totals"]
+    rescue_totals = _rescue_queue_for(entry, limit=1000, minimum_score=65)[
+        "totals"
+    ]
     realtime_metrics = realtime_metric_counts()
     lines = [
         "# HELP churn_customers_total Customers by churn risk level",
@@ -1079,17 +1368,22 @@ async def metrics():
         f'churn_reaction_outbox{{status="no_channel"}} {realtime_metrics["no_channel"]}',
         "",
     ]
+    return "\n".join(lines)
+
+
+@app.get("/metrics", response_class=PlainTextResponse)
+async def metrics():
     return PlainTextResponse(
-        "\n".join(lines), media_type="text/plain; version=0.0.4; charset=utf-8"
+        await asyncio.to_thread(_metrics_text),
+        media_type="text/plain; version=0.0.4; charset=utf-8",
     )
 
 
 @app.get("/health", include_in_schema=False)
 async def health():
     try:
-        with db() as connection:
-            connection.execute("SELECT 1").fetchone()
-    except sqlite3.Error:
+        await asyncio.to_thread(_database_healthcheck)
+    except DatabaseError:
         logger.exception("Health check failed while reading the database")
         raise HTTPException(
             status_code=503, detail="Хранилище временно недоступно"

@@ -1,10 +1,10 @@
 from __future__ import annotations
 
 import math
-from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime
-from typing import Any
+from functools import lru_cache
+from typing import Any, NamedTuple
 
 
 @dataclass(frozen=True)
@@ -12,130 +12,42 @@ class Feature:
     key: str
     label: str
     default_weight: int
-    active: Callable[[dict[str, Any]], bool]
-    explanation: Callable[[dict[str, Any]], str]
+
+
+class ServiceFact(NamedTuple):
+    """Typed, pre-parsed service values used by every analytics pass."""
+
+    status: str
+    billable: bool
+    price: float
+    monthly_revenue: float
+    autoprolong: bool
+    expires_ts: float | None
+    deleted_ts: float | None
+
+
+class TransactionFact(NamedTuple):
+    """The only transaction aggregates the current rule model needs."""
+
+    total: int
+    has_failed: bool
 
 
 def _is_billable(service: dict[str, Any]) -> bool:
     return str(service.get("status", "")).lower() in {"active", "suspended"}
 
 
-def _ending_soon(context: dict[str, Any]) -> bool:
-    now = context["now"]
-    return any(
-        _is_billable(service)
-        and not service.get("autoprolong", False)
-        and (expires := parse_date(service.get("expiresAt"))) is not None
-        and 0 <= (expires - now).total_seconds() <= 14 * 86400
-        for service in context["services"]
-    )
-
-
 def _due_soon(service: dict[str, Any], now: datetime) -> bool:
-    if str(service.get("status", "")).lower() == "prolong_wait":
-        return True
-    expires = parse_date(service.get("expiresAt"))
-    return (
-        _is_billable(service)
-        and expires is not None
-        and 0 <= (expires - now).total_seconds() <= 30 * 86400
-    )
-
-
-def _insufficient_funds(context: dict[str, Any]) -> bool:
-    due = [
-        service for service in context["services"] if _due_soon(service, context["now"])
-    ]
-    return bool(due) and context["available_balance"] < sum(
-        _number(service.get("price")) for service in due
-    )
-
-
-def _has_prolong_wait(context: dict[str, Any]) -> bool:
-    return any(
-        str(service.get("status", "")).lower() == "prolong_wait"
-        for service in context["services"]
-    )
-
-
-def _has_failed_transaction(context: dict[str, Any]) -> bool:
-    return any(
-        str(transaction.get("status", "")).lower() == "not_performed"
-        for transaction in context["transactions"]
-    )
-
-
-def _deleted_share(context: dict[str, Any]) -> bool:
-    services = context["services"]
-    return (
-        bool(services)
-        and sum(
-            str(service.get("status", "")).lower() == "deleted" for service in services
-        )
-        / len(services)
-        >= 0.3
-    )
-
-
-def _balance_pressure(context: dict[str, Any]) -> bool:
-    return (
-        context["monthly_revenue"] > 0
-        and context["available_balance"] < context["monthly_revenue"] * 2
-    )
+    return _fact_due_soon(build_service_fact(service), now.timestamp())
 
 
 FEATURES: tuple[Feature, ...] = (
-    Feature(
-        "expiring_without_autoprolong",
-        "Скорое окончание без автопродления",
-        25,
-        _ending_soon,
-        lambda _: (
-            "Есть оплачиваемая услуга без автопродления со сроком окончания в ближайшие 14 дней."
-        ),
-    ),
-    Feature(
-        "insufficient_funds",
-        "Не хватает средств на продление",
-        25,
-        _insufficient_funds,
-        lambda context: (
-            "На продления в ближайшие 30 дней не хватает "
-            f"{_money_cents(max(0, context['due_amount'] - context['available_balance']))}."
-        ),
-    ),
-    Feature(
-        "prolong_wait",
-        "Услуга ожидает оплаты",
-        25,
-        _has_prolong_wait,
-        lambda _: "Услуга ожидает оплаты в течение пятидневного льготного периода.",
-    ),
-    Feature(
-        "failed_transactions",
-        "Незавершённые платежи",
-        12,
-        _has_failed_transaction,
-        lambda _: "В снимке есть незавершённые транзакции.",
-    ),
-    Feature(
-        "deleted_services",
-        "Удалённые услуги",
-        8,
-        _deleted_share,
-        lambda context: (
-            "Удалено не менее 30% услуг аккаунта "
-            f"({sum(str(service.get('status', '')).lower() == 'deleted' for service in context['services'])} "
-            f"из {len(context['services'])})."
-        ),
-    ),
-    Feature(
-        "balance_pressure",
-        "Высокая нагрузка на баланс",
-        5,
-        _balance_pressure,
-        lambda _: "Доступного баланса меньше двух месяцев текущих платежей.",
-    ),
+    Feature("expiring_without_autoprolong", "Скорое окончание без автопродления", 25),
+    Feature("insufficient_funds", "Не хватает средств на продление", 25),
+    Feature("prolong_wait", "Услуга ожидает оплаты", 25),
+    Feature("failed_transactions", "Незавершённые платежи", 12),
+    Feature("deleted_services", "Удалённые услуги", 8),
+    Feature("balance_pressure", "Высокая нагрузка на баланс", 5),
 )
 DEFAULT_WEIGHTS = {feature.key: feature.default_weight for feature in FEATURES}
 FEATURE_LABELS = {feature.key: feature.label for feature in FEATURES}
@@ -159,25 +71,49 @@ def iso(value: datetime) -> str:
     return value.isoformat()
 
 
-def parse_date(value: Any) -> datetime | None:
+@lru_cache(maxsize=16_384)
+def _iso_timestamp(value: str) -> float | None:
+    try:
+        result = datetime.fromisoformat(value)
+        if result.tzinfo is None:
+            result = result.replace(tzinfo=UTC)
+        else:
+            result = result.astimezone(UTC)
+        return result.timestamp()
+    except (ValueError, TypeError, OverflowError, OSError):
+        return None
+
+
+def _value_timestamp(value: Any) -> float | None:
     if value is None or value == "":
         return None
     if isinstance(value, dict):
-        value = value.get("$date", value.get("$numberLong"))
-    try:
-        if isinstance(value, (int, float)) and not isinstance(value, bool):
-            seconds = (
-                float(value) / 1000
-                if abs(float(value)) > 100_000_000_000
-                else float(value)
-            )
-            return datetime.fromtimestamp(seconds, UTC)
-        result = datetime.fromisoformat(str(value))
-        return (
-            result.replace(tzinfo=UTC)
-            if result.tzinfo is None
-            else result.astimezone(UTC)
+        return _value_timestamp(value.get("$date", value.get("$numberLong")))
+    if isinstance(value, datetime):
+        result = (
+            value.replace(tzinfo=UTC)
+            if value.tzinfo is None
+            else value.astimezone(UTC)
         )
+        try:
+            return result.timestamp()
+        except (OverflowError, OSError, ValueError):
+            return None
+    if isinstance(value, (int, float)) and not isinstance(value, bool):
+        try:
+            number = float(value)
+        except (TypeError, ValueError, OverflowError):
+            return None
+        return number / 1000 if abs(number) > 100_000_000_000 else number
+    return _iso_timestamp(str(value))
+
+
+def parse_date(value: Any) -> datetime | None:
+    timestamp = _value_timestamp(value)
+    if timestamp is None:
+        return None
+    try:
+        return datetime.fromtimestamp(timestamp, UTC)
     except (ValueError, TypeError, OverflowError, OSError):
         return None
 
@@ -187,6 +123,12 @@ def payment_period(term: str) -> float:
 
 
 def _number(value: Any) -> float:
+    if type(value) is int:
+        return float(value) if value > 0 else 0.0
+    if type(value) is float:
+        return value if math.isfinite(value) and value > 0 else 0.0
+    if value is None:
+        return 0.0
     try:
         number = float(value or 0)
         return max(number, 0.0) if math.isfinite(number) else 0.0
@@ -194,32 +136,82 @@ def _number(value: Any) -> float:
         return 0.0
 
 
+def build_service_fact(service: dict[str, Any]) -> ServiceFact:
+    """Parse one raw service dict into the typed values analytics need."""
+
+    status = str(service.get("status", "")).lower()
+    price = _number(service.get("price"))
+    expires_raw = service.get("expiresAt")
+    deleted_raw = service.get("deletedAt")
+    return ServiceFact(
+        status=status,
+        billable=status in {"active", "suspended"},
+        price=price,
+        monthly_revenue=price
+        * PAYMENT_PERIODS_PER_MONTH.get(
+            str(service.get("paymentTerm", "month")), 1.0
+        ),
+        autoprolong=bool(service.get("autoprolong", False)),
+        expires_ts=(
+            _value_timestamp(expires_raw)
+            if expires_raw is not None and expires_raw != ""
+            else None
+        ),
+        deleted_ts=(
+            _value_timestamp(deleted_raw)
+            if deleted_raw is not None and deleted_raw != ""
+            else None
+        ),
+    )
+
+
+def _fact_due_soon(fact: ServiceFact, now_ts: float) -> bool:
+    if fact.status == "prolong_wait":
+        return True
+    return (
+        fact.billable
+        and fact.expires_ts is not None
+        and now_ts <= fact.expires_ts <= now_ts + 30 * 86400
+    )
+
+
+def _facts_for_customer(customer: dict[str, Any]) -> list[ServiceFact]:
+    services = customer.get("services", [])
+    facts = customer.get("_serviceFacts")
+    if (
+        isinstance(facts, list)
+        and len(facts) == len(services)
+        and (not facts or isinstance(facts[0], ServiceFact))
+    ):
+        return facts
+    return [build_service_fact(service) for service in services]
+
+
+def _owner_id(row: dict[str, Any]) -> str:
+    try:
+        return str(row["accountId"])
+    except KeyError:
+        return str(row.get("userId", row.get("account_id", "")))
+
+
 def _money_cents(value: float) -> str:
     return f"{value / 100:,.2f}".replace(",", " ").replace(".", ",") + " €"
 
 
-def analyze(
-    source: dict[str, list[dict[str, Any]]], weights: dict[str, float]
+def analyze_prepared(
+    accounts: list[dict[str, Any]],
+    services_by_account: dict[
+        str, tuple[list[dict[str, Any]], list[ServiceFact]]
+    ],
+    transactions_by_account: dict[str, TransactionFact],
+    weights: dict[str, float],
+    *,
+    now: datetime | None = None,
 ) -> list[dict[str, Any]]:
-    service_map: dict[str, list[dict[str, Any]]] = {}
-    transaction_map: dict[str, list[dict[str, Any]]] = {}
-    for service in source["services"]:
-        owner = str(
-            service.get(
-                "accountId", service.get("userId", service.get("account_id", ""))
-            )
-        )
-        service_map.setdefault(owner, []).append(service)
-    for transaction in source["transactions"]:
-        owner = str(
-            transaction.get(
-                "accountId",
-                transaction.get("userId", transaction.get("account_id", "")),
-            )
-        )
-        transaction_map.setdefault(owner, []).append(transaction)
+    """Score prepared snapshot facts without re-parsing raw JSON rows."""
 
-    now = utcnow()
+    now = now or utcnow()
+    now_ts = now.timestamp()
     results: list[dict[str, Any]] = []
     normalized_weights = {
         key: max(_number(weights.get(key, feature.default_weight)), 0.0)
@@ -228,10 +220,17 @@ def analyze(
     }
     total_weight = sum(normalized_weights.values())
 
-    for account in source["accounts"]:
+    for account in accounts:
         identifier = str(account.get("id", account.get("_id", "")))
-        services = service_map.get(identifier, [])
-        transactions = transaction_map.get(identifier, [])
+        prepared_services = services_by_account.get(identifier)
+        if prepared_services is None:
+            services: list[dict[str, Any]] = []
+            facts: list[ServiceFact] = []
+        else:
+            services, facts = prepared_services
+        transaction_fact = transactions_by_account.get(
+            identifier, TransactionFact(total=0, has_failed=False)
+        )
         balance = _number(account.get("balance"))
         bonus = (
             _number(account.get("bonusBalance"))
@@ -240,7 +239,7 @@ def analyze(
         )
         available_balance = balance + bonus
 
-        if not services and not transactions:
+        if not services and transaction_fact.total == 0:
             results.append(
                 {
                     "id": identifier,
@@ -254,6 +253,7 @@ def analyze(
                         "Недостаточно данных: у аккаунта нет услуг и транзакций."
                     ],
                     "services": [],
+                    "_serviceFacts": [],
                     "features": {},
                     "estimatedLoss": 0,
                     "monthlyRevenue": 0,
@@ -262,44 +262,101 @@ def analyze(
             )
             continue
 
-        monthly_services = [service for service in services if _is_billable(service)]
-        monthly_revenue = sum(
-            _number(service.get("price"))
-            * payment_period(str(service.get("paymentTerm", "month")))
-            for service in monthly_services
+        monthly_revenue = 0.0
+        due_amount = 0.0
+        has_due_service = False
+        ending_soon = False
+        has_prolong_wait = False
+        deleted_count = 0
+        nearest_expiry_ts: float | None = None
+        ending_deadline = now_ts + 14 * 86400
+
+        for fact in facts:
+            if fact.billable:
+                monthly_revenue += fact.monthly_revenue
+                if fact.expires_ts is not None:
+                    if (
+                        nearest_expiry_ts is None
+                        or fact.expires_ts < nearest_expiry_ts
+                    ):
+                        nearest_expiry_ts = fact.expires_ts
+                    if (
+                        not fact.autoprolong
+                        and now_ts <= fact.expires_ts <= ending_deadline
+                    ):
+                        ending_soon = True
+            if fact.status == "prolong_wait":
+                has_prolong_wait = True
+            elif fact.status == "deleted":
+                deleted_count += 1
+            if _fact_due_soon(fact, now_ts):
+                has_due_service = True
+                due_amount += fact.price
+
+        insufficient_funds = has_due_service and available_balance < due_amount
+        deleted_services = bool(facts) and deleted_count / len(facts) >= 0.3
+        balance_pressure = (
+            monthly_revenue > 0 and available_balance < monthly_revenue * 2
         )
-        due_services = [service for service in services if _due_soon(service, now)]
-        due_amount = sum(_number(service.get("price")) for service in due_services)
-        context: dict[str, Any] = {
-            "account": account,
-            "services": services,
-            "transactions": transactions,
-            "now": now,
-            "available_balance": available_balance,
-            "monthly_revenue": monthly_revenue,
-            "due_amount": due_amount,
+        signals = {
+            "expiring_without_autoprolong": ending_soon,
+            "insufficient_funds": insufficient_funds,
+            "prolong_wait": has_prolong_wait,
+            "failed_transactions": transaction_fact.has_failed,
+            "deleted_services": deleted_services,
+            "balance_pressure": balance_pressure,
         }
-        signals = {feature.key: feature.active(context) for feature in FEATURES}
-        weighted_score = sum(
-            normalized_weights[feature.key]
-            for feature in FEATURES
-            if signals[feature.key]
+        weighted_score = (
+            (normalized_weights["expiring_without_autoprolong"] if ending_soon else 0.0)
+            + (normalized_weights["insufficient_funds"] if insufficient_funds else 0.0)
+            + (normalized_weights["prolong_wait"] if has_prolong_wait else 0.0)
+            + (
+                normalized_weights["failed_transactions"]
+                if transaction_fact.has_failed
+                else 0.0
+            )
+            + (normalized_weights["deleted_services"] if deleted_services else 0.0)
+            + (normalized_weights["balance_pressure"] if balance_pressure else 0.0)
         )
         score = round(100 * weighted_score / total_weight) if total_weight else 0
-        risk_level = "high" if score >= 65 else "medium" if score >= 35 else "low"
-        reasons = [
-            feature.explanation(context) for feature in FEATURES if signals[feature.key]
-        ]
+        risk_level = (
+            "high"
+            if score >= RISK_THRESHOLDS["high"]
+            else "medium"
+            if score >= RISK_THRESHOLDS["medium"]
+            else "low"
+        )
+
+        reasons: list[str] = []
+        if signals["expiring_without_autoprolong"]:
+            reasons.append(
+                "Есть оплачиваемая услуга без автопродления со сроком окончания в ближайшие 14 дней."
+            )
+        if signals["insufficient_funds"]:
+            reasons.append(
+                "На продления в ближайшие 30 дней не хватает "
+                f"{_money_cents(max(0.0, due_amount - available_balance))}."
+            )
+        if signals["prolong_wait"]:
+            reasons.append(
+                "Услуга ожидает оплаты в течение пятидневного льготного периода."
+            )
+        if signals["failed_transactions"]:
+            reasons.append("В снимке есть незавершённые транзакции.")
+        if signals["deleted_services"]:
+            reasons.append(
+                "Удалено не менее 30% услуг аккаунта "
+                f"({deleted_count} из {len(facts)})."
+            )
+        if signals["balance_pressure"]:
+            reasons.append(
+                "Доступного баланса меньше двух месяцев текущих платежей."
+            )
         if not reasons:
             reasons = ["Критические сигналы риска не обнаружены."]
 
         horizon_revenue = monthly_revenue * 3
         loss = max(0.0, horizon_revenue - available_balance) * RISK_FACTORS[risk_level]
-        expiring_dates = [
-            (parse_date(service.get("expiresAt")) - now).total_seconds() / 86400
-            for service in monthly_services
-            if parse_date(service.get("expiresAt")) is not None
-        ]
         results.append(
             {
                 "id": identifier,
@@ -311,63 +368,139 @@ def analyze(
                 "riskLevel": risk_level,
                 "reasons": reasons,
                 "services": services,
+                "_serviceFacts": facts,
                 "features": signals,
                 "estimatedLoss": round(loss),
                 "monthlyRevenue": round(monthly_revenue),
-                "daysToExpiry": round(min(expiring_dates), 1)
-                if expiring_dates
-                else None,
+                "daysToExpiry": (
+                    round((nearest_expiry_ts - now_ts) / 86400, 1)
+                    if nearest_expiry_ts is not None
+                    else None
+                ),
             }
         )
     return results
 
 
-def summary(customers: list[dict[str, Any]]) -> dict[str, Any]:
-    now = utcnow()
+def analyze(
+    source: dict[str, list[dict[str, Any]]],
+    weights: dict[str, float],
+    *,
+    now: datetime | None = None,
+) -> list[dict[str, Any]]:
+    """Compatibility wrapper: group and prepare a raw snapshot, then score it."""
+
+    services_by_account: dict[
+        str, tuple[list[dict[str, Any]], list[ServiceFact]]
+    ] = {}
+    for service in source["services"]:
+        owner = _owner_id(service)
+        prepared = services_by_account.get(owner)
+        if prepared is None:
+            prepared = ([], [])
+            services_by_account[owner] = prepared
+        prepared[0].append(service)
+        prepared[1].append(build_service_fact(service))
+
+    transaction_counts: dict[str, list[int]] = {}
+    for transaction in source["transactions"]:
+        owner = _owner_id(transaction)
+        counts = transaction_counts.get(owner)
+        if counts is None:
+            counts = [0, 0]
+            transaction_counts[owner] = counts
+        counts[0] += 1
+        if str(transaction.get("status", "")).lower() == "not_performed":
+            counts[1] = 1
+    transactions_by_account = {
+        owner: TransactionFact(total=counts[0], has_failed=bool(counts[1]))
+        for owner, counts in transaction_counts.items()
+    }
+    return analyze_prepared(
+        source["accounts"],
+        services_by_account,
+        transactions_by_account,
+        weights,
+        now=now,
+    )
+
+
+def summary(
+    customers: list[dict[str, Any]], *, now: datetime | None = None
+) -> dict[str, Any]:
+    moment = now or utcnow()
+    now_ts = moment.timestamp()
     at_risk_services = 0
     waiting_services = 0
-    expiring_days: list[float] = []
+    forecast_buckets = [0, 0, 0, 0, 0]
+    rated_count = 0
+    unrated_count = 0
+    risk_counts = {"high": 0, "medium": 0, "low": 0}
+    estimated_loss = 0.0
+    monthly_revenue_at_risk = 0.0
+
     for customer in customers:
-        for service in customer.get("services", []):
-            status = str(service.get("status", "")).lower()
-            expires = parse_date(service.get("expiresAt"))
-            days = (expires - now).total_seconds() / 86400 if expires else None
+        if customer["score"] is None:
+            unrated_count += 1
+        else:
+            rated_count += 1
+        risk_level = customer["riskLevel"]
+        if risk_level in risk_counts:
+            risk_counts[risk_level] += 1
+        estimated_loss += customer["estimatedLoss"]
+        monthly_revenue_at_risk += customer["monthlyRevenue"] * RISK_FACTORS.get(
+            risk_level, 0
+        )
+
+        for fact in _facts_for_customer(customer):
+            days = (
+                (fact.expires_ts - now_ts) / 86400
+                if fact.expires_ts is not None
+                else None
+            )
             expiring = (
-                status in {"active", "suspended"}
+                fact.billable
                 and days is not None
                 and 0 <= days <= 14
-                and not service.get("autoprolong", False)
+                and not fact.autoprolong
             )
-            at_risk_services += int(status == "prolong_wait" or expiring)
-            waiting_services += int(status == "prolong_wait")
+            if fact.status == "prolong_wait":
+                waiting_services += 1
+                at_risk_services += 1
+            elif expiring:
+                at_risk_services += 1
             if (
-                status in {"active", "suspended"}
-                and not service.get("autoprolong", False)
+                fact.billable
+                and not fact.autoprolong
                 and days is not None
                 and 0 <= days <= 30
             ):
-                expiring_days.append(days)
+                if days <= 0:
+                    forecast_buckets[0] += 1
+                elif days <= 7:
+                    forecast_buckets[1] += 1
+                elif days <= 14:
+                    forecast_buckets[2] += 1
+                elif days <= 21:
+                    forecast_buckets[3] += 1
+                else:
+                    forecast_buckets[4] += 1
 
-    forecast = [
-        waiting_services + sum(day <= horizon for day in expiring_days)
-        for horizon in (0, 7, 14, 21, 30)
-    ]
+    forecast: list[int] = []
+    cumulative = waiting_services
+    for bucket in forecast_buckets:
+        cumulative += bucket
+        forecast.append(cumulative)
+
     return {
         "customerCount": len(customers),
-        "ratedCount": sum(customer["score"] is not None for customer in customers),
-        "unratedCount": sum(customer["score"] is None for customer in customers),
-        "highRisk": sum(customer["riskLevel"] == "high" for customer in customers),
-        "mediumRisk": sum(customer["riskLevel"] == "medium" for customer in customers),
-        "lowRisk": sum(customer["riskLevel"] == "low" for customer in customers),
-        "estimatedLoss": round(
-            sum(customer["estimatedLoss"] for customer in customers)
-        ),
-        "monthlyRevenueAtRisk": round(
-            sum(
-                customer["monthlyRevenue"] * RISK_FACTORS.get(customer["riskLevel"], 0)
-                for customer in customers
-            )
-        ),
+        "ratedCount": rated_count,
+        "unratedCount": unrated_count,
+        "highRisk": risk_counts["high"],
+        "mediumRisk": risk_counts["medium"],
+        "lowRisk": risk_counts["low"],
+        "estimatedLoss": round(estimated_loss),
+        "monthlyRevenueAtRisk": round(monthly_revenue_at_risk),
         "atRiskServices": at_risk_services,
         "churnForecast": {"days": [0, 7, 14, 21, 30], "counts": forecast},
     }
@@ -418,36 +551,35 @@ def churn_timeline(
     future_expected = [0.0] * len(FUTURE_BUCKETS)
     deleted_total = 0
 
+    moment_ts = moment.timestamp()
     for customer in customers:
         factor = RISK_FACTORS.get(customer.get("riskLevel"), 0)
         risky_owner = customer.get("riskLevel") in {"high", "medium"}
-        for service in customer.get("services", []):
-            status = str(service.get("status", "")).lower()
-            if status == "deleted":
+        for fact in _facts_for_customer(customer):
+            if fact.status == "deleted":
                 deleted_total += 1
-                deleted_at = parse_date(service.get("deletedAt")) or parse_date(
-                    service.get("expiresAt")
+                deleted_ts = (
+                    fact.deleted_ts
+                    if fact.deleted_ts is not None
+                    else fact.expires_ts
                 )
-                if deleted_at is not None:
-                    days = (deleted_at - moment).total_seconds() / 86400
+                if deleted_ts is not None:
+                    days = (deleted_ts - moment_ts) / 86400
                     index = _bucket_index(PAST_BUCKETS, days)
                     if index is not None:
                         past_deleted[index] += 1
                 continue
-            if status == "prolong_wait":
+            if fact.status == "prolong_wait":
                 future_at_risk[0] += 1
                 future_expected[0] += factor
                 continue
-            if status not in {"active", "suspended"}:
+            if not fact.billable or fact.expires_ts is None:
                 continue
-            expires = parse_date(service.get("expiresAt"))
-            if expires is None:
-                continue
-            days = (expires - moment).total_seconds() / 86400
+            days = (fact.expires_ts - moment_ts) / 86400
             index = _bucket_index(FUTURE_BUCKETS, days)
             if index is None:
                 continue
-            if service.get("autoprolong", False) and not risky_owner:
+            if fact.autoprolong and not risky_owner:
                 continue
             future_at_risk[index] += 1
             future_expected[index] += factor
@@ -503,23 +635,18 @@ _ALERT_SEVERITY_ORDER = {"critical": 0, "warning": 1, "info": 2}
 
 
 def _service_days(service: dict[str, Any], now: datetime) -> float | None:
-    expires = parse_date(service.get("expiresAt"))
-    if expires is None:
+    expires_ts = _value_timestamp(service.get("expiresAt"))
+    if expires_ts is None:
         return None
-    return (expires - now).total_seconds() / 86400
-
-
-def _due_services(customer: dict[str, Any], now: datetime) -> list[dict[str, Any]]:
-    return [
-        service
-        for service in customer.get("services", [])
-        if _due_soon(service, now)
-    ]
+    return (expires_ts - now.timestamp()) / 86400
 
 
 def _shortage(customer: dict[str, Any], now: datetime) -> int:
+    now_ts = now.timestamp()
     due_amount = sum(
-        _number(service.get("price")) for service in _due_services(customer, now)
+        fact.price
+        for fact in _facts_for_customer(customer)
+        if _fact_due_soon(fact, now_ts)
     )
     available = _number(customer.get("availableBalance", customer.get("balance")))
     return round(max(0.0, due_amount - available))
@@ -528,19 +655,27 @@ def _shortage(customer: dict[str, Any], now: datetime) -> int:
 def _nearest_deadline(
     customer: dict[str, Any], now: datetime
 ) -> tuple[datetime | None, float | None, dict[str, Any] | None]:
-    candidates: list[tuple[datetime, dict[str, Any]]] = []
-    for service in customer.get("services", []):
-        status = str(service.get("status", "")).lower()
-        if status == "prolong_wait":
-            candidates.append((parse_date(service.get("expiresAt")) or now, service))
-        elif _is_billable(service):
-            expires = parse_date(service.get("expiresAt"))
-            if expires is not None:
-                candidates.append((expires, service))
-    if not candidates:
+    now_ts = now.timestamp()
+    best_ts: float | None = None
+    best_service: dict[str, Any] | None = None
+    services = customer.get("services", [])
+    for service, fact in zip(services, _facts_for_customer(customer), strict=False):
+        if fact.status == "prolong_wait":
+            candidate_ts = fact.expires_ts if fact.expires_ts is not None else now_ts
+        elif fact.billable and fact.expires_ts is not None:
+            candidate_ts = fact.expires_ts
+        else:
+            continue
+        if best_ts is None or candidate_ts < best_ts:
+            best_ts = candidate_ts
+            best_service = service
+    if best_ts is None or best_service is None:
         return None, None, None
-    deadline, service = min(candidates, key=lambda item: item[0])
-    return deadline, (deadline - now).total_seconds() / 86400, service
+    return (
+        datetime.fromtimestamp(best_ts, UTC),
+        (best_ts - now_ts) / 86400,
+        best_service,
+    )
 
 
 def _urgency_component(days: float | None, features: dict[str, bool]) -> float:
@@ -744,6 +879,7 @@ def alert_candidates(
 ) -> list[dict[str, Any]]:
     """Currently true risk conditions that deserve an operator alert."""
     moment = now or utcnow()
+    moment_ts = moment.timestamp()
     candidates: list[dict[str, Any]] = []
 
     for customer in customers:
@@ -797,14 +933,13 @@ def alert_candidates(
                 "Клиент находится в льготном периоде. Если оплату не закрыть сейчас, услуга может отключиться.",
             )
 
-        expiring = [
-            service
-            for service in customer.get("services", [])
-            if _is_billable(service)
-            and not service.get("autoprolong", False)
-            and (_service_days(service, moment) is not None)
-            and 0 <= float(_service_days(service, moment)) <= 3
-        ]
+        expiring = any(
+            fact.billable
+            and not fact.autoprolong
+            and fact.expires_ts is not None
+            and moment_ts <= fact.expires_ts <= moment_ts + 3 * 86400
+            for fact in _facts_for_customer(customer)
+        )
         if expiring:
             add(
                 "expiry_72h",

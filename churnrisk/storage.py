@@ -2,43 +2,35 @@ from __future__ import annotations
 
 import json
 import math
-import sqlite3
-from collections.abc import Iterator
-from contextlib import contextmanager
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
 from .config import (
-    DATABASE_PATH,
     LOGIN_ATTEMPT_LIMIT,
     LOGIN_WINDOW_SECONDS,
     MAX_ACCOUNTS,
     MAX_SERVICES,
     MAX_TRANSACTIONS,
 )
-from .domain import DEFAULT_WEIGHTS, iso, parse_date, utcnow
+from .database import Connection, acquire_schema_lock, database_connection
+from .domain import (
+    DEFAULT_WEIGHTS,
+    ServiceFact,
+    TransactionFact,
+    build_service_fact,
+    iso,
+    parse_date,
+    utcnow,
+)
+
+# Kept as the storage module's public connection factory for existing
+# imports.  The implementation now lives in churnrisk.database and may
+# return either SQLite or pooled PostgreSQL connections.
+db = database_connection
 
 
 class SnapshotValidationError(ValueError):
     """The uploaded snapshot cannot be stored without losing or misreading data."""
-
-
-@contextmanager
-def db() -> Iterator[sqlite3.Connection]:
-    """Open a short-lived SQLite connection and always close it after use."""
-    DATABASE_PATH.parent.mkdir(parents=True, exist_ok=True)
-    connection = sqlite3.connect(DATABASE_PATH, timeout=15)
-    connection.row_factory = sqlite3.Row
-    connection.execute("PRAGMA foreign_keys = ON")
-    connection.execute("PRAGMA busy_timeout = 15000")
-    try:
-        yield connection
-        connection.commit()
-    except Exception:
-        connection.rollback()
-        raise
-    finally:
-        connection.close()
 
 
 def _seed_snapshot() -> dict[str, list[dict[str, Any]]]:
@@ -318,7 +310,12 @@ def _account_rows(rows: Any) -> tuple[list[dict[str, Any]], set[str]]:
     return normalized, identifiers
 
 
-def _related_rows(rows: Any, table: str, account_ids: set[str]) -> list[dict[str, Any]]:
+def _related_rows(
+    rows: Any,
+    table: str,
+    account_ids: set[str],
+    encoded: list[str] | None = None,
+) -> list[dict[str, Any]]:
     max_rows = MAX_SERVICES if table == "services" else MAX_TRANSACTIONS
     if not isinstance(rows, list) or len(rows) > max_rows:
         raise SnapshotValidationError(
@@ -396,67 +393,144 @@ def _related_rows(rows: Any, table: str, account_ids: set[str]) -> list[dict[str
                 )
             item["type"] = transaction_type
         try:
-            json.dumps(item, ensure_ascii=False, allow_nan=False)
+            encoded_item = json.dumps(item, ensure_ascii=False, allow_nan=False)
         except (TypeError, ValueError):
             raise SnapshotValidationError(
                 f"{table}[{index}] содержит неподдерживаемые значения"
             ) from None
+        if encoded is not None:
+            encoded.append(encoded_item)
         normalized.append(item)
     return normalized
 
 
-def validate_snapshot(snapshot: dict[str, Any]) -> dict[str, list[dict[str, Any]]]:
-    from .snapshot import normalize_snapshot
-
+def _encode_account(row: dict[str, Any], index: int) -> str:
     try:
-        snapshot = normalize_snapshot(snapshot)
-    except (ValueError, TypeError) as error:
-        raise SnapshotValidationError(str(error)) from error
-    accounts, account_ids = _account_rows(snapshot["accounts"])
-    services = _related_rows(snapshot["services"], "services", account_ids)
-    transactions = _related_rows(
-        snapshot.get("transactions", []), "transactions", account_ids
+        return json.dumps(row, ensure_ascii=False, allow_nan=False)
+    except (TypeError, ValueError):
+        raise SnapshotValidationError(
+            f"accounts[{index}] содержит неподдерживаемые значения"
+        ) from None
+
+
+def _validated_snapshot(
+    snapshot: dict[str, Any],
+    *,
+    already_normalized: bool = False,
+    encoded_out: dict[str, list[str]] | None = None,
+) -> dict[str, list[dict[str, Any]]]:
+    if already_normalized:
+        if not isinstance(snapshot, dict):
+            raise SnapshotValidationError("Снимок должен быть объектом")
+        source = {
+            "accounts": snapshot.get("accounts", []),
+            "services": snapshot.get("services", []),
+            "transactions": snapshot.get("transactions", []),
+        }
+    else:
+        from .snapshot import normalize_snapshot
+
+        try:
+            source = normalize_snapshot(snapshot)
+        except (ValueError, TypeError) as error:
+            raise SnapshotValidationError(str(error)) from error
+
+    accounts, account_ids = _account_rows(source["accounts"])
+    encoded_services: list[str] | None = [] if encoded_out is not None else None
+    encoded_transactions: list[str] | None = [] if encoded_out is not None else None
+    services = _related_rows(
+        source["services"], "services", account_ids, encoded_services
     )
+    transactions = _related_rows(
+        source.get("transactions", []),
+        "transactions",
+        account_ids,
+        encoded_transactions,
+    )
+    if encoded_out is not None:
+        encoded_out["accounts"] = [
+            _encode_account(row, index) for index, row in enumerate(accounts)
+        ]
+        encoded_out["services"] = encoded_services or []
+        encoded_out["transactions"] = encoded_transactions or []
     return {"accounts": accounts, "services": services, "transactions": transactions}
 
 
-def replace_snapshot(connection: sqlite3.Connection, snapshot: dict[str, Any]) -> int:
-    normalized = validate_snapshot(snapshot)
+def validate_snapshot(
+    snapshot: dict[str, Any], *, already_normalized: bool = False
+) -> dict[str, list[dict[str, Any]]]:
+    return _validated_snapshot(snapshot, already_normalized=already_normalized)
+
+
+def replace_snapshot(
+    connection: Connection,
+    snapshot: dict[str, Any],
+    *,
+    already_normalized: bool = False,
+) -> int:
+    encoded: dict[str, list[str]] = {}
+    normalized = _validated_snapshot(
+        snapshot,
+        already_normalized=already_normalized,
+        encoded_out=encoded,
+    )
+    service_facts = [build_service_fact(row) for row in normalized["services"]]
+
+    # Every row is validated and JSON-encoded before the first DELETE, so
+    # a bad value can never leave a half-replaced snapshot behind.
     connection.execute("DELETE FROM services")
     connection.execute("DELETE FROM transactions")
     connection.execute("DELETE FROM accounts")
     connection.executemany(
         "INSERT INTO accounts (id, data) VALUES (?, ?)",
         (
-            (row["id"], json.dumps(row, ensure_ascii=False, allow_nan=False))
-            for row in normalized["accounts"]
+            (row["id"], encoded_row)
+            for row, encoded_row in zip(
+                normalized["accounts"], encoded["accounts"], strict=True
+            )
         ),
     )
     connection.executemany(
-        "INSERT INTO services (id, account_id, data) VALUES (?, ?, ?)",
+        """
+        INSERT INTO services (
+            id, account_id, data, status, price_cents, monthly_revenue_cents,
+            autoprolong, expires_at_ts, deleted_at_ts
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """,
         (
             (
                 row["id"],
                 row["accountId"],
-                json.dumps(row, ensure_ascii=False, allow_nan=False),
+                encoded_row,
+                fact.status,
+                round(fact.price),
+                fact.monthly_revenue,
+                int(fact.autoprolong),
+                fact.expires_ts,
+                fact.deleted_ts,
             )
-            for row in normalized["services"]
+            for row, encoded_row, fact in zip(
+                normalized["services"],
+                encoded["services"],
+                service_facts,
+                strict=True,
+            )
         ),
     )
     connection.executemany(
-        "INSERT INTO transactions (id, account_id, data) VALUES (?, ?, ?)",
+        "INSERT INTO transactions (id, account_id, data, status) VALUES (?, ?, ?, ?)",
         (
-            (
-                row["id"],
-                row["accountId"],
-                json.dumps(row, ensure_ascii=False, allow_nan=False),
+            (row["id"], row["accountId"], encoded_row, row["status"])
+            for row, encoded_row in zip(
+                normalized["transactions"],
+                encoded["transactions"],
+                strict=True,
             )
-            for row in normalized["transactions"]
         ),
     )
     connection.execute(
         "INSERT INTO metadata (key, value) VALUES ('snapshot_version', '2') "
-        "ON CONFLICT(key) DO UPDATE SET value=CAST(value AS INTEGER)+1"
+        "ON CONFLICT(key) DO UPDATE SET value=CAST(metadata.value AS INTEGER)+1"
     )
     connection.execute(
         "INSERT INTO metadata (key, value) VALUES ('snapshot_initialized', '1') "
@@ -465,7 +539,7 @@ def replace_snapshot(connection: sqlite3.Connection, snapshot: dict[str, Any]) -
     return len(normalized["accounts"])
 
 
-def load_source(connection: sqlite3.Connection) -> dict[str, list[dict[str, Any]]]:
+def load_source(connection: Connection) -> dict[str, list[dict[str, Any]]]:
     source: dict[str, list[dict[str, Any]]] = {}
     for table in ("accounts", "services", "transactions"):
         source[table] = [
@@ -475,7 +549,99 @@ def load_source(connection: sqlite3.Connection) -> dict[str, list[dict[str, Any]
     return source
 
 
-def get_weights(connection: sqlite3.Connection) -> dict[str, float]:
+def _json_object(value: Any) -> dict[str, Any]:
+    if isinstance(value, dict):
+        return value
+    if isinstance(value, bytes):
+        value = value.decode("utf-8")
+    parsed = json.loads(value)
+    return parsed if isinstance(parsed, dict) else {}
+
+
+def load_account(
+    connection: Connection, account_id: str
+) -> dict[str, Any] | None:
+    row = connection.execute(
+        "SELECT data FROM accounts WHERE id=?", (account_id,)
+    ).fetchone()
+    return _json_object(row[0]) if row is not None else None
+
+
+def load_prepared_source(
+    connection: Connection,
+) -> tuple[
+    list[dict[str, Any]],
+    dict[str, tuple[list[dict[str, Any]], list[ServiceFact]]],
+    dict[str, TransactionFact],
+]:
+    """Load a snapshot grouped for analysis.
+
+    Services still carry their raw JSON because the customer detail and
+    rescue views need names/dates, but scoring facts come from typed
+    columns materialized at snapshot ingest.  Transactions are reduced
+    in SQL to the only aggregates the rule model uses, so a million-row
+    transaction export is not JSON-parsed on every analysis refresh.
+    """
+
+    accounts = [
+        _json_object(row[0])
+        for row in connection.execute("SELECT data FROM accounts")
+    ]
+
+    services_by_account: dict[
+        str, tuple[list[dict[str, Any]], list[ServiceFact]]
+    ] = {}
+    service_rows = connection.execute(
+        """
+        SELECT account_id, data, status, price_cents, monthly_revenue_cents,
+               autoprolong, expires_at_ts, deleted_at_ts
+        FROM services
+        """
+    )
+    for row in service_rows:
+        account_id = str(row["account_id"])
+        raw = _json_object(row["data"])
+        status = str(row["status"] or "")
+        if status:
+            expires_ts = row["expires_at_ts"]
+            deleted_ts = row["deleted_at_ts"]
+            fact = ServiceFact(
+                status=status,
+                billable=status in {"active", "suspended"},
+                price=float(row["price_cents"] or 0),
+                monthly_revenue=float(row["monthly_revenue_cents"] or 0),
+                autoprolong=bool(row["autoprolong"]),
+                expires_ts=float(expires_ts) if expires_ts is not None else None,
+                deleted_ts=float(deleted_ts) if deleted_ts is not None else None,
+            )
+        else:
+            fact = build_service_fact(raw)
+        prepared = services_by_account.get(account_id)
+        if prepared is None:
+            prepared = ([], [])
+            services_by_account[account_id] = prepared
+        prepared[0].append(raw)
+        prepared[1].append(fact)
+
+    transactions_by_account: dict[str, TransactionFact] = {}
+    transaction_rows = connection.execute(
+        """
+        SELECT account_id, COUNT(*) AS total_count,
+               SUM(CASE WHEN status='not_performed' THEN 1 ELSE 0 END) AS failed_count
+        FROM transactions
+        GROUP BY account_id
+        """
+    )
+    for row in transaction_rows:
+        transactions_by_account[str(row["account_id"])] = TransactionFact(
+            total=int(row["total_count"] or 0),
+            has_failed=int(row["failed_count"] or 0) > 0,
+        )
+
+    return accounts, services_by_account, transactions_by_account
+
+
+def get_weights(connection: Connection) -> dict[str, float]:
     row = connection.execute(
         "SELECT value FROM settings WHERE key='weights'"
     ).fetchone()
@@ -484,7 +650,7 @@ def get_weights(connection: sqlite3.Connection) -> dict[str, float]:
 
 
 def update_weights(
-    connection: sqlite3.Connection, changes: dict[str, float]
+    connection: Connection, changes: dict[str, float]
 ) -> dict[str, float]:
     weights = get_weights(connection)
     weights.update(changes)
@@ -495,12 +661,12 @@ def update_weights(
     )
     connection.execute(
         "INSERT INTO metadata (key, value) VALUES ('model_version', '1') "
-        "ON CONFLICT(key) DO UPDATE SET value=CAST(value AS INTEGER)+1"
+        "ON CONFLICT(key) DO UPDATE SET value=CAST(metadata.value AS INTEGER)+1"
     )
     return weights
 
 
-def _rate_key_attempts(connection: sqlite3.Connection, key: str) -> tuple[bool, int]:
+def _rate_key_attempts(connection: Connection, key: str) -> tuple[bool, int]:
     now = utcnow().timestamp()
     row = connection.execute(
         "SELECT window_started, attempts FROM login_attempts WHERE key=?", (key,)
@@ -523,6 +689,10 @@ def login_rate_limited(key: str) -> tuple[bool, int]:
 def record_login_failure(key: str) -> None:
     now = utcnow().timestamp()
     with db() as connection:
+        connection.execute(
+            "DELETE FROM login_attempts WHERE window_started<?",
+            (now - LOGIN_WINDOW_SECONDS,),
+        )
         row = connection.execute(
             "SELECT window_started, attempts FROM login_attempts WHERE key=?", (key,)
         ).fetchone()
@@ -543,12 +713,147 @@ def clear_login_failures(key: str) -> None:
         connection.execute("DELETE FROM login_attempts WHERE key=?", (key,))
 
 
+def _table_columns(connection: Connection, table: str) -> set[str]:
+    if connection.dialect == "sqlite":
+        return {
+            str(row[1])
+            for row in connection.execute(f"PRAGMA table_info({table})").fetchall()
+        }
+    return {
+        str(row[0])
+        for row in connection.execute(
+            "SELECT column_name FROM information_schema.columns "
+            "WHERE table_schema=current_schema() AND table_name=?",
+            (table,),
+        ).fetchall()
+    }
+
+
+def _ensure_snapshot_fact_columns(connection: Connection) -> None:
+    """Add and backfill typed snapshot facts on pre-stage-1 databases."""
+
+    columns_by_table: dict[str, dict[str, str]] = {
+        "services": {
+            "status": "TEXT NOT NULL DEFAULT ''",
+            "price_cents": "BIGINT NOT NULL DEFAULT 0",
+            "monthly_revenue_cents": "DOUBLE PRECISION NOT NULL DEFAULT 0",
+            "autoprolong": "INTEGER NOT NULL DEFAULT 0",
+            "expires_at_ts": "DOUBLE PRECISION",
+            "deleted_at_ts": "DOUBLE PRECISION",
+        },
+        "transactions": {
+            "status": "TEXT NOT NULL DEFAULT ''",
+        },
+    }
+    for table, columns in columns_by_table.items():
+        existing = _table_columns(connection, table)
+        for name, definition in columns.items():
+            if name not in existing:
+                connection.execute(
+                    f"ALTER TABLE {table} ADD COLUMN {name} {definition}"
+                )
+
+    for statement in (
+        (
+            "CREATE INDEX IF NOT EXISTS services_account_status_idx "
+            "ON services(account_id, status)"
+        ),
+        "CREATE INDEX IF NOT EXISTS services_expires_idx ON services(expires_at_ts)",
+        (
+            "CREATE INDEX IF NOT EXISTS transactions_account_status_idx "
+            "ON transactions(account_id, status)"
+        ),
+    ):
+        connection.execute(statement)
+
+    version_row = connection.execute(
+        "SELECT value FROM metadata WHERE key='snapshot_facts_version'"
+    ).fetchone()
+    if version_row is not None and str(version_row[0]) == "1":
+        return
+
+    service_rows = connection.execute("SELECT id, data FROM services").fetchall()
+    service_updates: list[tuple[Any, ...]] = []
+    for row in service_rows:
+        fact = build_service_fact(_json_object(row["data"]))
+        service_updates.append(
+            (
+                fact.status,
+                round(fact.price),
+                fact.monthly_revenue,
+                int(fact.autoprolong),
+                fact.expires_ts,
+                fact.deleted_ts,
+                row["id"],
+            )
+        )
+        if len(service_updates) >= 5000:
+            connection.executemany(
+                """
+                UPDATE services
+                SET status=?, price_cents=?, monthly_revenue_cents=?,
+                    autoprolong=?, expires_at_ts=?, deleted_at_ts=?
+                WHERE id=?
+                """,
+                service_updates,
+            )
+            service_updates.clear()
+    if service_updates:
+        connection.executemany(
+            """
+            UPDATE services
+            SET status=?, price_cents=?, monthly_revenue_cents=?,
+                autoprolong=?, expires_at_ts=?, deleted_at_ts=?
+            WHERE id=?
+            """,
+            service_updates,
+        )
+
+    transaction_rows = connection.execute(
+        "SELECT id, data FROM transactions"
+    ).fetchall()
+    transaction_updates: list[tuple[Any, ...]] = []
+    for row in transaction_rows:
+        status = str(_json_object(row["data"]).get("status", "")).strip().casefold()
+        transaction_updates.append((status, row["id"]))
+        if len(transaction_updates) >= 5000:
+            connection.executemany(
+                "UPDATE transactions SET status=? WHERE id=?", transaction_updates
+            )
+            transaction_updates.clear()
+    if transaction_updates:
+        connection.executemany(
+            "UPDATE transactions SET status=? WHERE id=?", transaction_updates
+        )
+
+    connection.execute(
+        "INSERT INTO metadata (key, value) VALUES ('snapshot_facts_version', '1') "
+        "ON CONFLICT(key) DO UPDATE SET value='1'"
+    )
+
+
 def init_db() -> None:
     with db() as connection:
+        acquire_schema_lock(connection)
         connection.executescript("""
         CREATE TABLE IF NOT EXISTS accounts (id TEXT PRIMARY KEY, data TEXT NOT NULL);
-        CREATE TABLE IF NOT EXISTS services (id TEXT PRIMARY KEY, account_id TEXT NOT NULL, data TEXT NOT NULL);
-        CREATE TABLE IF NOT EXISTS transactions (id TEXT PRIMARY KEY, account_id TEXT NOT NULL, data TEXT NOT NULL);
+        CREATE TABLE IF NOT EXISTS services (
+            id TEXT PRIMARY KEY,
+            account_id TEXT NOT NULL,
+            data TEXT NOT NULL,
+            status TEXT NOT NULL DEFAULT '',
+            price_cents BIGINT NOT NULL DEFAULT 0,
+            monthly_revenue_cents DOUBLE PRECISION NOT NULL DEFAULT 0,
+            autoprolong INTEGER NOT NULL DEFAULT 0,
+            expires_at_ts DOUBLE PRECISION,
+            deleted_at_ts DOUBLE PRECISION
+        );
+        CREATE TABLE IF NOT EXISTS transactions (
+            id TEXT PRIMARY KEY,
+            account_id TEXT NOT NULL,
+            data TEXT NOT NULL,
+            status TEXT NOT NULL DEFAULT ''
+        );
         CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT NOT NULL);
         CREATE TABLE IF NOT EXISTS sessions (token_hash TEXT PRIMARY KEY, username TEXT NOT NULL, expires_at TEXT NOT NULL);
         CREATE TABLE IF NOT EXISTS metadata (key TEXT PRIMARY KEY, value TEXT NOT NULL);
@@ -581,7 +886,11 @@ def init_db() -> None:
         );
         CREATE INDEX IF NOT EXISTS services_account_id_idx ON services(account_id);
         CREATE INDEX IF NOT EXISTS transactions_account_id_idx ON transactions(account_id);
+        CREATE INDEX IF NOT EXISTS sessions_expires_idx ON sessions(expires_at);
+        CREATE INDEX IF NOT EXISTS oidc_states_expires_idx ON oidc_states(expires_at);
+        CREATE INDEX IF NOT EXISTS login_attempts_window_idx ON login_attempts(window_started);
         """)
+        _ensure_snapshot_fact_columns(connection)
         connection.execute(
             "INSERT OR IGNORE INTO settings (key, value) VALUES ('weights', ?)",
             (json.dumps(DEFAULT_WEIGHTS),),

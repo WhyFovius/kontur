@@ -4,8 +4,11 @@ import hashlib
 import hmac
 import os
 import secrets
+from threading import Lock
 
 _CONFIGURED_SALT = b"churn-risk-configured-password-v1"
+_EXPECTED_HASH_LOCK = Lock()
+_EXPECTED_HASH_CACHE: tuple[bytes, str] | None = None
 
 
 def password_hash(password: str, salt: bytes | None = None) -> str:
@@ -31,15 +34,32 @@ def configured_admin() -> tuple[str, str]:
     return username, password
 
 
+def _configured_password_hash(expected_password: str) -> str:
+    global _EXPECTED_HASH_CACHE
+    fingerprint = hashlib.sha256(expected_password.encode("utf-8")).digest()
+    with _EXPECTED_HASH_LOCK:
+        cached = _EXPECTED_HASH_CACHE
+        if cached is not None and hmac.compare_digest(cached[0], fingerprint):
+            return cached[1]
+        expected_hash = password_hash(expected_password, _CONFIGURED_SALT)
+        _EXPECTED_HASH_CACHE = (fingerprint, expected_hash)
+        return expected_hash
+
+
 def verify_admin(username: str, password: str) -> bool:
     expected_username, expected_password = configured_admin()
     # Always perform the expensive password derivation, even if the username is wrong.
     actual_hash = password_hash(password, _CONFIGURED_SALT)
-    expected_hash = password_hash(expected_password, _CONFIGURED_SALT)
+    expected_hash = _configured_password_hash(expected_password)
     username_matches = hmac.compare_digest(
         username.encode("utf-8"), expected_username.encode("utf-8")
     )
     password_matches = hmac.compare_digest(
         actual_hash.encode("ascii"), expected_hash.encode("ascii")
     )
-    return username_matches & password_matches
+    # An unset administrator credential must fail closed.  Without this
+    # explicit check, an empty Basic password would compare equal to an
+    # empty ADMIN_PASSWORD even though the UI reports password login as
+    # unavailable.
+    credentials_configured = bool(expected_username and expected_password)
+    return credentials_configured and username_matches & password_matches

@@ -3,7 +3,6 @@ from __future__ import annotations
 import json
 import os
 import random
-import sqlite3
 import threading
 import uuid
 from collections.abc import Callable
@@ -11,8 +10,16 @@ from datetime import datetime, timedelta
 from typing import Any, Protocol
 
 from .alerts import _insert_event, ensure_alert_tables
+from .database import (
+    Connection,
+    DatabaseError,
+    Row,
+    acquire_schema_lock,
+    mark_schema_ready,
+    schema_is_ready,
+)
 from .domain import RISK_THRESHOLDS, iso, parse_date, rescue_queue, utcnow
-from .storage import db, load_source
+from .storage import db, load_account
 
 DEMO_SCENARIOS = (
     "NORMAL_ACTIVITY",
@@ -121,7 +128,10 @@ SOURCE_ADAPTERS: tuple[EventSourceAdapter, ...] = (
 )
 
 
-def ensure_realtime_tables(connection: sqlite3.Connection) -> None:
+def ensure_realtime_tables(connection: Connection) -> None:
+    if schema_is_ready(connection, "realtime"):
+        return
+    acquire_schema_lock(connection)
     connection.executescript(
         """
         CREATE TABLE IF NOT EXISTS demo_customer_state (
@@ -164,6 +174,8 @@ def ensure_realtime_tables(connection: sqlite3.Connection) -> None:
             ON realtime_events(customer_id, id DESC);
         CREATE INDEX IF NOT EXISTS realtime_events_created_idx
             ON realtime_events(created_at DESC, id DESC);
+        CREATE INDEX IF NOT EXISTS realtime_events_mode_created_idx
+            ON realtime_events(mode, created_at DESC, id DESC);
         CREATE TABLE IF NOT EXISTS risk_calculations (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             event_id TEXT NOT NULL UNIQUE,
@@ -183,6 +195,8 @@ def ensure_realtime_tables(connection: sqlite3.Connection) -> None:
         );
         CREATE INDEX IF NOT EXISTS risk_calculations_customer_idx
             ON risk_calculations(customer_id, id DESC);
+        CREATE INDEX IF NOT EXISTS risk_calculations_calculated_idx
+            ON risk_calculations(calculated_at, id);
         CREATE TABLE IF NOT EXISTS reaction_templates (
             id TEXT PRIMARY KEY,
             name TEXT NOT NULL,
@@ -217,9 +231,10 @@ def ensure_realtime_tables(connection: sqlite3.Connection) -> None:
         """
     )
     _seed_templates(connection)
+    mark_schema_ready(connection, "realtime")
 
 
-def _seed_templates(connection: sqlite3.Connection) -> None:
+def _seed_templates(connection: Connection) -> None:
     now = iso(utcnow())
     templates = [
         (
@@ -286,6 +301,10 @@ def _seed_templates(connection: sqlite3.Connection) -> None:
 
 
 def _json(value: Any, fallback: Any) -> Any:
+    if isinstance(value, (dict, list)):
+        return value
+    if isinstance(value, bytes):
+        value = value.decode("utf-8", errors="ignore")
     try:
         parsed = json.loads(value or "")
     except (json.JSONDecodeError, TypeError):
@@ -293,7 +312,7 @@ def _json(value: Any, fallback: Any) -> Any:
     return parsed
 
 
-def _serialize_event(row: sqlite3.Row, actions: list[dict[str, Any]] | None = None) -> dict[str, Any]:
+def _serialize_event(row: Row, actions: list[dict[str, Any]] | None = None) -> dict[str, Any]:
     return {
         "id": int(row["id"]),
         "eventId": row["event_id"],
@@ -322,7 +341,7 @@ def _serialize_event(row: sqlite3.Row, actions: list[dict[str, Any]] | None = No
     }
 
 
-def _serialize_template(row: sqlite3.Row) -> dict[str, Any]:
+def _serialize_template(row: Row) -> dict[str, Any]:
     return {
         "id": row["id"],
         "name": row["name"],
@@ -338,7 +357,7 @@ def _serialize_template(row: sqlite3.Row) -> dict[str, Any]:
     }
 
 
-def _serialize_outbox(row: sqlite3.Row) -> dict[str, Any]:
+def _serialize_outbox(row: Row) -> dict[str, Any]:
     return {
         "id": int(row["id"]),
         "eventId": row["event_id"],
@@ -374,16 +393,13 @@ def _contacts_from_account(account: dict[str, Any] | None, email: str | None) ->
     return contacts
 
 
-def _source_accounts() -> dict[str, dict[str, Any]]:
+def _source_account(
+    connection: Connection, account_id: str
+) -> dict[str, Any] | None:
     try:
-        with db() as connection:
-            source = load_source(connection)
-    except (OSError, ValueError, sqlite3.Error):
-        return {}
-    return {
-        str(account.get("id", account.get("_id", ""))): account
-        for account in source.get("accounts", [])
-    }
+        return load_account(connection, account_id)
+    except (OSError, ValueError, DatabaseError):
+        return None
 
 
 def _risk_level(percent: int) -> str:
@@ -405,7 +421,7 @@ def _scenario_event_type(scenario: str) -> str:
     }[scenario]
 
 
-def _rate_limited(connection: sqlite3.Connection, now: datetime) -> bool:
+def _rate_limited(connection: Connection, now: datetime) -> bool:
     since = iso(now - timedelta(minutes=1))
     count = connection.execute(
         "SELECT COUNT(*) FROM realtime_events WHERE created_at >= ?", (since,)
@@ -414,7 +430,7 @@ def _rate_limited(connection: sqlite3.Connection, now: datetime) -> bool:
 
 
 def _notification_on_cooldown(
-    connection: sqlite3.Connection,
+    connection: Connection,
     customer_id: str | None,
     event_type: str,
     now: datetime,
@@ -455,7 +471,7 @@ def _choose_channel(strategy: str, contacts: dict[str, str]) -> tuple[str, str |
 
 
 def _create_reactions(
-    connection: sqlite3.Connection,
+    connection: Connection,
     *,
     event_id: str,
     event_type: str,
@@ -540,9 +556,6 @@ def process_demo_event(
     if not generated_event_id or len(generated_event_id) > 120:
         raise ValueError("event_id должен содержать от 1 до 120 символов")
 
-    customers_by_id = {str(customer["id"]): customer for customer in customers}
-    accounts = _source_accounts()
-
     with db() as connection:
         ensure_realtime_tables(connection)
         ensure_alert_tables(connection)
@@ -563,18 +576,27 @@ def process_demo_event(
 
         is_new_customer = scenario == "NEW_CUSTOMER_ACTIVITY" and not customer_id
         selected_id = customer_id
+        base_customer: dict[str, Any] | None = None
         if is_new_customer:
             suffix = uuid.uuid4().hex[:8]
             selected_id = f"demo-{suffix}"
-        elif not selected_id:
+        elif selected_id:
+            base_customer = next(
+                (
+                    customer
+                    for customer in customers
+                    if str(customer["id"]) == selected_id
+                ),
+                None,
+            )
+        else:
             rated = [c for c in customers if c.get("score") is not None]
             pool = rated or customers
             if not pool:
                 raise ValueError("Нет клиентов для DEMO-события")
-            selected_id = str(_rng.choice(pool)["id"])
+            base_customer = _rng.choice(pool)
+            selected_id = str(base_customer["id"])
         assert selected_id is not None
-
-        base_customer = customers_by_id.get(selected_id)
         state_row = connection.execute(
             "SELECT * FROM demo_customer_state WHERE customer_id=?", (selected_id,)
         ).fetchone()
@@ -588,7 +610,9 @@ def process_demo_event(
             base_reasons = list(base_customer.get("reasons") or [])
             estimated_loss = round(float(base_customer.get("estimatedLoss") or 0))
             days_to_expiry = base_customer.get("daysToExpiry")
-            contacts = _contacts_from_account(accounts.get(selected_id), email)
+            contacts = _contacts_from_account(
+                _source_account(connection, selected_id), email
+            )
         else:
             email = str(state_row["email"]) if state_row else f"new.{selected_id}@example.test"
             base_percent = 28
@@ -1002,10 +1026,10 @@ def realtime_dashboard(customers: list[dict[str, Any]], hours: int = 24) -> dict
         ensure_realtime_tables(connection)
         latest_rows = connection.execute(
             """
-            SELECT c.* FROM risk_calculations c
+            SELECT c.customer_id, c.risk_percent FROM risk_calculations c
             JOIN (
                 SELECT customer_id, MAX(id) AS max_id FROM risk_calculations GROUP BY customer_id
-            ) last ON last.max_id=c.id
+            ) latest_calc ON latest_calc.max_id=c.id
             """
         ).fetchall()
         event_count, critical_count, improved_count = connection.execute(
@@ -1035,30 +1059,40 @@ def realtime_dashboard(customers: list[dict[str, Any]], hours: int = 24) -> dict
         ).fetchall()
 
     latest_by_customer = {str(row["customer_id"]): int(row["risk_percent"]) for row in latest_rows}
-    current_scores: list[int] = []
+    distribution = {"high": 0, "medium": 0, "low": 0}
+    score_total = 0
+    score_count = 0
+    live_ids: set[str] = set()
+
+    def add_score(score: int) -> None:
+        nonlocal score_total, score_count
+        distribution[_risk_level(score)] += 1
+        score_total += score
+        score_count += 1
+
     for customer in customers:
         customer_id = str(customer["id"])
+        live_ids.add(customer_id)
         if customer_id in latest_by_customer:
-            current_scores.append(latest_by_customer[customer_id])
+            add_score(latest_by_customer[customer_id])
         elif customer.get("score") is not None:
-            current_scores.append(int(customer["score"]))
-    live_ids = {str(customer["id"]) for customer in customers}
-    current_scores.extend(
-        score for customer_id, score in latest_by_customer.items() if customer_id not in live_ids
-    )
-    distribution = {"high": 0, "medium": 0, "low": 0}
-    for score in current_scores:
-        distribution[_risk_level(score)] += 1
+            add_score(int(customer["score"]))
+    for customer_id, score in latest_by_customer.items():
+        if customer_id not in live_ids:
+            add_score(score)
 
     def bucket_label(value: str) -> str:
+        if len(value) >= 13 and value[10] in {"T", " "}:
+            return f"{value[11:13]}:00"
         parsed = parse_date(value)
         return parsed.strftime("%H:00") if parsed else value[:13]
 
     risk_buckets: dict[str, list[int]] = {}
     for row in calc_rows:
-        risk_buckets.setdefault(bucket_label(str(row["calculated_at"])), []).append(
-            int(row["risk_percent"])
-        )
+        label = bucket_label(str(row["calculated_at"]))
+        bucket = risk_buckets.setdefault(label, [0, 0])
+        bucket[0] += int(row["risk_percent"])
+        bucket[1] += 1
     event_buckets: dict[str, int] = {}
     for row in event_rows:
         label = bucket_label(str(row["created_at"]))
@@ -1071,12 +1105,12 @@ def realtime_dashboard(customers: list[dict[str, Any]], hours: int = 24) -> dict
         "highRiskCustomers": distribution["high"],
         "eventsInPeriod": int(event_count or 0),
         "criticalEvents": int(critical_count or 0),
-        "averageRiskPercent": round(sum(current_scores) / len(current_scores), 1) if current_scores else 0,
+        "averageRiskPercent": round(score_total / score_count, 1) if score_count else 0,
         "improvedCustomers": int(improved_count or 0),
         "distribution": distribution,
         "riskSeries": [
-            {"label": label, "value": round(sum(values) / len(values), 1)}
-            for label, values in list(risk_buckets.items())[-24:]
+            {"label": label, "value": round(total / count, 1)}
+            for label, (total, count) in list(risk_buckets.items())[-24:]
         ],
         "eventSeries": [
             {"label": label, "value": value}
@@ -1252,7 +1286,7 @@ class DemoSimulator:
                 self.generated_count += 1
                 self.last_event_id = str(event["eventId"])
                 self.last_error = None
-            except (OSError, RuntimeError, ValueError, sqlite3.Error) as error:
+            except (OSError, RuntimeError, ValueError, DatabaseError) as error:
                 # A simulator failure is visible in status and must not kill API.
                 self.last_error = str(error)
             if self._stop.wait(self.interval_seconds):
@@ -1265,13 +1299,17 @@ simulator = DemoSimulator()
 def realtime_status(customers: list[dict[str, Any]]) -> dict[str, Any]:
     with db() as connection:
         ensure_realtime_tables(connection)
-        total_events = int(connection.execute("SELECT COUNT(*) FROM realtime_events").fetchone()[0])
-        demo_events = int(
-            connection.execute("SELECT COUNT(*) FROM realtime_events WHERE mode='DEMO'").fetchone()[0]
-        )
-        live_events = int(
-            connection.execute("SELECT COUNT(*) FROM realtime_events WHERE mode='LIVE'").fetchone()[0]
-        )
+        counts = connection.execute(
+            """
+            SELECT COUNT(*) AS total_count,
+                   SUM(CASE WHEN mode='DEMO' THEN 1 ELSE 0 END) AS demo_count,
+                   SUM(CASE WHEN mode='LIVE' THEN 1 ELSE 0 END) AS live_count
+            FROM realtime_events
+            """
+        ).fetchone()
+        total_events = int(counts["total_count"] or 0)
+        demo_events = int(counts["demo_count"] or 0)
+        live_events = int(counts["live_count"] or 0)
     return {
         "generatedAt": iso(utcnow()),
         "sources": [adapter.status() for adapter in SOURCE_ADAPTERS],
