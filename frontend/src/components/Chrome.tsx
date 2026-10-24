@@ -45,16 +45,16 @@ export function ThemeToggle({
       aria-label={isDark ? "Переключить на светлую тему" : "Переключить на тёмную тему"}
       aria-pressed={isDark}
       title={isDark ? "Переключить на светлую тему" : "Переключить на тёмную тему"}
-      whileTap={{ scale: 0.88, rotate: isDark ? -12 : 12 }}
+      whileTap={{ scale: 0.88 }}
       transition={springSnappy}
     >
       <AnimatePresence mode="popLayout" initial={false}>
         <motion.span
           key={theme}
           className="theme-icon-swap"
-          initial={{ opacity: 0, rotate: -70, scale: 0.5 }}
+          initial={{ opacity: 0, rotate: -35, scale: 0.65 }}
           animate={{ opacity: 1, rotate: 0, scale: 1 }}
-          exit={{ opacity: 0, rotate: 70, scale: 0.5 }}
+          exit={{ opacity: 0, rotate: 35, scale: 0.65 }}
           transition={springSnappy}
           aria-hidden="true"
         >
@@ -324,7 +324,6 @@ export function Topbar({
         <span className="updated-time">{lastUpdated}</span>
         <ThemeToggle theme={theme} onToggle={onToggleTheme} />
         <motion.button
-          layout
           type="button"
           className={`button button-primary upload-button upload-${uploadPhase}`}
           onClick={onUploadClick}
@@ -334,7 +333,7 @@ export function Topbar({
           whileTap={{ scale: 0.97 }}
           transition={springSnappy}
         >
-          <AnimatePresence mode="wait" initial={false}>
+          <AnimatePresence mode="popLayout" initial={false}>
             <motion.span
               key={uploadPhase}
               className="upload-label-wrap"

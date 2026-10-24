@@ -177,12 +177,111 @@ function nextStep(customer: Customer): string {
 /*  Expanded detail                                                    */
 /* ------------------------------------------------------------------ */
 
+/**
+ * Fallback labels mirroring FEATURE_LABELS in churnrisk/domain.py. The API
+ * also returns them as settings.features, which takes precedence.
+ */
+const FACTOR_LABELS: Record<string, string> = {
+  expiring_without_autoprolong: "Скорое окончание без автопродления",
+  insufficient_funds: "Не хватает средств на продление",
+  prolong_wait: "Услуга ожидает оплаты",
+  failed_transactions: "Незавершённые платежи",
+  deleted_services: "Удалённые услуги",
+  balance_pressure: "Высокая нагрузка на баланс",
+};
+
+/**
+ * "Explain the score": the server score is a weight-normalised sum, and the
+ * API returns both the triggered factors (features) and the weights, so the
+ * per-factor points below are computed, not invented. Small differences
+ * vs. the stored score come from rounding each contribution.
+ */
+function FactorBreakdown({
+  customer,
+  weights,
+  featureLabels,
+}: {
+  customer: Customer;
+  weights?: Record<string, number>;
+  featureLabels?: Record<string, string>;
+}) {
+  if (customer.score == null) {
+    return (
+      <motion.section className="detail-section factor-breakdown" variants={staggerChild}>
+        <h3>Как сложился риск-скор</h3>
+        <p className="empty-detail">
+          Score не рассчитан — недостаточно данных об услугах. Это честный пробел данных, а
+          не «нулевой риск»; общий масштаб таких клиентов виден в центре качества данных на
+          обзоре.
+        </p>
+      </motion.section>
+    );
+  }
+  const keys = Object.keys(weights ?? {});
+  if (!keys.length) return null;
+  const totalWeight = keys.reduce(
+    (sum, key) => sum + Math.max(Number(weights?.[key]) || 0, 0),
+    0,
+  );
+  const rows = keys
+    .map((key) => {
+      const weight = Math.max(Number(weights?.[key]) || 0, 0);
+      const potential = totalWeight ? Math.round((weight / totalWeight) * 100) : 0;
+      const active = Boolean(customer.features?.[key]);
+      return {
+        key,
+        label: featureLabels?.[key] ?? FACTOR_LABELS[key] ?? key,
+        active,
+        points: active ? potential : 0,
+        potential,
+      };
+    })
+    .sort((a, b) => Number(b.active) - Number(a.active) || b.potential - a.potential);
+  const earned = rows.reduce((sum, row) => sum + row.points, 0);
+  const level = customer.riskLevel || "unrated";
+
+  return (
+    <motion.section
+      className={`detail-section factor-breakdown factor-${level}`}
+      variants={staggerChild}
+    >
+      <h3>Как сложился риск-скор {integer(customer.score)}</h3>
+      <ul className="factor-list">
+        {rows.map((row) => (
+          <li key={row.key} className={`factor-row${row.active ? " is-active" : ""}`}>
+            <span className="factor-label">{row.label}</span>
+            <span className="factor-bar" aria-hidden="true">
+              <motion.span
+                initial={{ width: 0 }}
+                animate={{ width: `${row.active ? row.points : row.potential}%` }}
+                transition={emphasizedTween}
+              />
+            </span>
+            <span className="factor-points">
+              {row.active ? `+${integer(row.points)}` : `0 из +${integer(row.potential)}`}
+            </span>
+          </li>
+        ))}
+      </ul>
+      <p className="factor-summary">
+        Сработавшие факторы дают ≈{integer(earned)} из 100 — это и есть score клиента
+        (расхождение в пределах округления вкладов). Веса и пороги настраиваются на
+        странице модели; what-if там покажет эффект до сохранения.
+      </p>
+    </motion.section>
+  );
+}
+
 function CustomerDetail({
   initial,
   onToast,
+  weights,
+  featureLabels,
 }: {
   initial: Customer;
   onToast: (message: string, persistent?: boolean) => void;
+  weights?: Record<string, number>;
+  featureLabels?: Record<string, string>;
 }) {
   const [customer, setCustomer] = useState<Customer>(initial);
   const [copied, setCopied] = useState(false);
@@ -276,6 +375,8 @@ function CustomerDetail({
         ))}
       </motion.div>
 
+      <FactorBreakdown customer={customer} weights={weights} featureLabels={featureLabels} />
+
       <motion.section className="detail-section" variants={staggerChild}>
         <h3>Что повлияло на оценку</h3>
         {customer.reasons?.length ? (
@@ -363,11 +464,13 @@ interface RowProps {
   direction: number;
   onToggle: (id: string) => void;
   onToast: (message: string, persistent?: boolean) => void;
+  weights?: Record<string, number>;
+  featureLabels?: Record<string, string>;
 }
 
 const CustomerRow = memo(
   forwardRef<HTMLDivElement, RowProps>(function CustomerRow(
-    { customer, expanded, direction, onToggle, onToast }: RowProps,
+    { customer, expanded, direction, onToggle, onToast, weights, featureLabels }: RowProps,
     ref,
   ) {
   const level = customer.riskLevel || "unrated";
@@ -474,7 +577,7 @@ const CustomerRow = memo(
             transition={{ ...emphasizedTween, duration: 0.45 }}
             className="row-detail-clip"
           >
-            <CustomerDetail initial={customer} onToast={onToast} />
+            <CustomerDetail initial={customer} onToast={onToast} weights={weights} featureLabels={featureLabels} />
           </motion.div>
         )}
       </AnimatePresence>
@@ -483,11 +586,148 @@ const CustomerRow = memo(
   }),
 );
 
+export interface SavedView {
+  id: string;
+  name: string;
+  risk: RiskLevel | "";
+  sort: SortKey;
+  order: SortOrder;
+}
+
+function SavedViewsBar({
+  views,
+  activeViewId,
+  onApply,
+  onSave,
+  onDelete,
+}: {
+  views: SavedView[];
+  activeViewId: string | null;
+  onApply: (view: SavedView) => void;
+  onSave: (name: string) => void;
+  onDelete: (id: string) => void;
+}) {
+  const [name, setName] = useState("");
+  const [formOpen, setFormOpen] = useState(false);
+
+  const submit = () => {
+    const trimmed = name.trim();
+    if (!trimmed) return;
+    onSave(trimmed);
+    setName("");
+    setFormOpen(false);
+  };
+
+  return (
+    <div className="saved-views" aria-label="Сохранённые представления очереди">
+      <span className="saved-views-label">Мои виды</span>
+      <div className="saved-views-chips">
+        <AnimatePresence initial={false}>
+          {views.map((view) => (
+            <motion.span
+              key={view.id}
+              layout
+              className={`saved-view-chip${view.id === activeViewId ? " is-active" : ""}`}
+              initial={{ opacity: 0, scale: 0.85 }}
+              animate={{ opacity: 1, scale: 1 }}
+              exit={{ opacity: 0, scale: 0.85 }}
+              transition={springSnappy}
+            >
+              <button
+                type="button"
+                className="saved-view-apply"
+                onClick={() => onApply(view)}
+                aria-pressed={view.id === activeViewId}
+                title={`Применить вид «${view.name}»`}
+              >
+                {view.name}
+              </button>
+              <button
+                type="button"
+                className="saved-view-delete"
+                onClick={() => onDelete(view.id)}
+                aria-label={`Удалить вид «${view.name}»`}
+              >
+                ×
+              </button>
+            </motion.span>
+          ))}
+        </AnimatePresence>
+        {!views.length && (
+          <span className="saved-views-empty">
+            Настройте фильтр и сортировку — и сохраните комбинацию как именованный вид.
+          </span>
+        )}
+      </div>
+      <AnimatePresence mode="popLayout" initial={false}>
+        {formOpen ? (
+          <motion.form
+            key="form"
+            className="saved-view-form"
+            initial={{ opacity: 0, x: -8 }}
+            animate={{ opacity: 1, x: 0 }}
+            exit={{ opacity: 0, x: 8 }}
+            transition={springSnappy}
+            onSubmit={(event) => {
+              event.preventDefault();
+              submit();
+            }}
+          >
+            <input
+              value={name}
+              onChange={(event) => setName(event.target.value)}
+              placeholder="Например: Высокий риск · по сроку"
+              aria-label="Название вида"
+              maxLength={40}
+              autoFocus
+            />
+            <button
+              type="submit"
+              className="button button-primary button-small"
+              disabled={!name.trim()}
+            >
+              Сохранить
+            </button>
+            <button
+              type="button"
+              className="button button-ghost button-small"
+              onClick={() => setFormOpen(false)}
+            >
+              Отмена
+            </button>
+          </motion.form>
+        ) : (
+          <motion.button
+            key="open"
+            type="button"
+            className="button button-tonal button-small"
+            onClick={() => setFormOpen(true)}
+            initial={{ opacity: 0, x: -8 }}
+            animate={{ opacity: 1, x: 0 }}
+            exit={{ opacity: 0, x: 8 }}
+            whileTap={{ scale: 0.96 }}
+            transition={springSnappy}
+          >
+            + Сохранить текущий вид
+          </motion.button>
+        )}
+      </AnimatePresence>
+    </div>
+  );
+}
+
 /* ------------------------------------------------------------------ */
 /*  The panel                                                          */
 /* ------------------------------------------------------------------ */
 
 export interface CustomerListProps {
+  weights?: Record<string, number>;
+  featureLabels?: Record<string, string>;
+  views: SavedView[];
+  activeViewId: string | null;
+  onApplyView: (view: SavedView) => void;
+  onSaveView: (name: string) => void;
+  onDeleteView: (id: string) => void;
   items: Customer[];
   total: number;
   sort: SortKey;
@@ -520,6 +760,13 @@ const COLUMNS: { key: SortKey | null; label: string; className: string }[] = [
 
 export function CustomerList(props: CustomerListProps) {
   const {
+    weights,
+    featureLabels,
+    views,
+    activeViewId,
+    onApplyView,
+    onSaveView,
+    onDeleteView,
     items,
     total,
     sort,
@@ -548,10 +795,18 @@ export function CustomerList(props: CustomerListProps) {
         <div className="section-heading-copy">
           <span className="eyebrow">Рабочая очередь</span>
           <h2>Приоритет контакта</h2>
-          <p>Фильтр можно переключать зажатием и ведением указателя. Откройте клиента — карточка развернётся прямо в списке.</p>
+          <p>Это Risk Inbox команды: сверху — те, кому пишем сегодня. Фильтр переключается зажатием и ведением указателя, а удачные комбинации фильтра и сортировки сохраняются именованными видами.</p>
         </div>
         <SegmentedFilter value={risk} onChange={onRiskChange} />
       </div>
+
+      <SavedViewsBar
+        views={views}
+        activeViewId={activeViewId}
+        onApply={onApplyView}
+        onSave={onSaveView}
+        onDelete={onDeleteView}
+      />
 
       <div className="list-head" aria-hidden="false">
         {COLUMNS.map((column, index) =>
@@ -637,6 +892,8 @@ export function CustomerList(props: CustomerListProps) {
                 direction={direction}
                 onToggle={onToggle}
                 onToast={onToast}
+                weights={weights}
+                featureLabels={featureLabels}
               />
             ))}
           </AnimatePresence>
