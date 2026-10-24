@@ -18,7 +18,7 @@
 
 - Python 3.12, FastAPI, Pydantic и Uvicorn.
 - SQLite: снимок, веса, сессии и ограничения входа.
-- HTML, CSS и vanilla JavaScript: без сборщика и внешних frontend-зависимостей.
+- Frontend: React 19 + TypeScript + Vite + Framer Motion 12, дизайн-система Material Design 3 Expressive. Собранный бандл коммитится в `static/app` и раздаётся FastAPI без Node на сервере; если бандла нет, отдаются прежние vanilla-страницы (фолбэк и откат).
 - Docker Compose: один контейнер приложения; SQLite хранится в файле `data/churn.db` на хосте.
 
 ```text
@@ -27,8 +27,10 @@ churnrisk/api.py        HTTP-маршруты, сессии, заголовки 
 churnrisk/domain.py     признаки, оценка риска и аналитика
 churnrisk/storage.py    SQLite, валидация и атомарная замена снимка
 churnrisk/schemas.py    входные и выходные схемы API
-static/                 стили, скрипты и страница входа
-templates/index.html    панель аналитики
+frontend/               исходники React-панели (Vite, Framer Motion, M3 Expressive)
+static/app/             собранный фронт: раздаётся FastAPI на `/` и `/login`
+static/                 шрифты, тема, vendor Swagger UI и легаси-страницы (фолбэк)
+templates/index.html    легаси-панель аналитики (фолбэк без собранного фронта)
 tests/                  доменные и API-проверки
 ```
 
@@ -72,6 +74,16 @@ $env:ADMIN_USERNAME = "admin"
 $env:ADMIN_PASSWORD = "set-a-unique-local-password"
 python -m uvicorn code:app --reload
 ```
+
+Пересборка фронта (нужен Node 20+; результат пишется в `static/app` и коммитится, чтобы Python-образ работал без Node):
+
+```powershell
+cd frontend
+npm install
+npm run build
+```
+
+Для итераций по интерфейсу рядом с Uvicorn можно запустить `npm run dev` (Vite на порту 5173 проксирует `/api` на `127.0.0.1:8000`); прод-путь всегда один — собранный `static/app` из FastAPI, под строгой CSP `script-src 'self'` (поэтому в сборке отключён инлайн-polyfill modulepreload).
 
 По умолчанию SQLite создаётся в `data/churn.db`. Путь можно переопределить через `DATABASE_PATH`. При первом запуске пустой базы приложение создаёт восемь синтетических демонстрационных аккаунтов. Загрузка снимка полностью заменяет аккаунты, услуги и транзакции в одной транзакции; веса модели и сессии сохраняются.
 
