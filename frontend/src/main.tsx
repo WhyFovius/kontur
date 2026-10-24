@@ -6,7 +6,9 @@ const Dashboard = lazy(() =>
   import("./Dashboard").then((m) => ({ default: m.Dashboard })),
 );
 import { Login } from "./Login";
+import { LiquidGlassDefs } from "./components/LiquidGlass";
 import "./styles/tokens.css";
+import "./styles/liquid-glass.css";
 import "./styles/dashboard.css";
 import "./styles/login.css";
 
@@ -18,6 +20,7 @@ const isLogin = window.location.pathname === "/login";
 createRoot(document.getElementById("root") as HTMLElement).render(
   <StrictMode>
     <MotionConfig reducedMotion="user">
+      <LiquidGlassDefs />
       {isLogin ? (
         <Login />
       ) : (

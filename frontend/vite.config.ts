@@ -31,6 +31,9 @@ export default defineConfig({
   server: {
     host: "0.0.0.0",
     port: 5173,
+    // The Arena preview is served through a generated *.e2b.app host.
+    // Vite's host allow-list would otherwise reject it with HTTP 403.
+    allowedHosts: true,
     proxy: {
       "/api": "http://127.0.0.1:8000",
       "/health": "http://127.0.0.1:8000",

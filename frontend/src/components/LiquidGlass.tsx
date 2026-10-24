@@ -268,11 +268,12 @@ export function GlassButton({
 }
 
 export interface GlassIconButtonProps
-  extends Omit<HTMLAttributes<HTMLButtonElement>, "children"> {
+  extends Omit<HTMLAttributes<HTMLButtonElement>, "children" | "type"> {
   children?: ReactNode;
   label: string;
   size?: "small" | "medium";
   tone?: "clear" | "dark";
+  type?: "button" | "submit" | "reset";
 }
 
 export function GlassIconButton({
