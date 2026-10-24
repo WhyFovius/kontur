@@ -1,9 +1,7 @@
 from __future__ import annotations
 
-import asyncio
 import base64
 import hashlib
-import json
 import logging
 import os
 import secrets
@@ -21,22 +19,12 @@ from fastapi.responses import (
     JSONResponse,
     PlainTextResponse,
     RedirectResponse,
-    StreamingResponse,
 )
 from fastapi.security import APIKeyCookie
 from fastapi.staticfiles import StaticFiles
 from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
 from . import oidc as oidc_service
-from .alerts import (
-    events_after,
-    latest_event_id,
-    list_notifications,
-    mark_all_notifications_read,
-    mark_notification_read,
-    notification_counts,
-    sync_alerts,
-)
 from .config import (
     MAX_SNAPSHOT_BYTES,
     SESSION_DAYS,
@@ -50,7 +38,6 @@ from .domain import (
     analyze,
     churn_timeline,
     iso,
-    rescue_queue,
     summary,
     utcnow,
 )
@@ -63,9 +50,6 @@ from .schemas import (
     LoginRequest,
     LoginResponse,
     ModelSettingsResponse,
-    NotificationListResponse,
-    NotificationReadResponse,
-    RescueQueueResponse,
     SettingsPatch,
     SnapshotRequest,
     SnapshotResponse,
@@ -316,16 +300,6 @@ def _public_customer(customer: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-def _sync_realtime_alerts(
-    customers: list[dict[str, Any]], aggregate: dict[str, Any]
-) -> None:
-    """Best-effort monitor sync; analytics must not fail because alerts did."""
-    try:
-        sync_alerts(customers, aggregate)
-    except Exception:
-        logger.exception("Realtime risk monitor sync failed")
-
-
 def _analyzed_data() -> tuple[list[dict[str, Any]], dict[str, Any]]:
     global _analysis_cache
     with db() as connection:
@@ -346,7 +320,6 @@ def _analyzed_data() -> tuple[list[dict[str, Any]], dict[str, Any]]:
     aggregate = summary(customers)
     with _analysis_cache_lock:
         _analysis_cache = (cache_key, now, customers, aggregate)
-    _sync_realtime_alerts(customers, aggregate)
     return customers, aggregate
 
 
@@ -615,109 +588,6 @@ async def analytics_churn_timeline(_: str = Depends(current_user)):
     return churn_timeline(customers)
 
 
-@app.get("/api/v1/analytics/rescue-queue", response_model=RescueQueueResponse)
-async def analytics_rescue_queue(
-    limit: int = Query(default=10, ge=1, le=100),
-    minimum_score: int = Query(default=65, ge=0, le=100),
-    _: str = Depends(current_user),
-):
-    customers, _data = _analyzed_data()
-    with db() as connection:
-        weights = get_weights(connection)
-    return rescue_queue(
-        customers, weights=weights, limit=limit, minimum_score=minimum_score
-    )
-
-
-@app.get("/api/v1/notifications", response_model=NotificationListResponse)
-async def get_notifications(
-    limit: int = Query(default=30, ge=1, le=100),
-    unread_only: bool = False,
-    _: str = Depends(current_user),
-):
-    # Touch the analysis first so a cold panel sees the monitor's current
-    # episodes instead of an empty table until some other endpoint runs.
-    _analyzed_data()
-    return list_notifications(limit=limit, unread_only=unread_only)
-
-
-@app.post(
-    "/api/v1/notifications/read-all", response_model=NotificationReadResponse
-)
-async def read_all_notifications(_: str = Depends(current_user)):
-    updated = mark_all_notifications_read()
-    unread, _critical = notification_counts()
-    return {"ok": True, "updatedCount": updated, "unreadCount": unread}
-
-
-@app.post(
-    "/api/v1/notifications/{notification_id}/read",
-    response_model=NotificationReadResponse,
-)
-async def read_notification(
-    notification_id: int, _: str = Depends(current_user)
-):
-    notification = mark_notification_read(notification_id)
-    if notification is None:
-        raise HTTPException(status_code=404, detail="Уведомление не найдено")
-    unread, _critical = notification_counts()
-    return {
-        "ok": True,
-        "notification": notification,
-        "updatedCount": 1,
-        "unreadCount": unread,
-    }
-
-
-def _sse_event(event: str, payload: dict[str, Any]) -> str:
-    return f"event: {event}\ndata: {json.dumps(payload, ensure_ascii=False)}\n\n"
-
-
-@app.get("/api/v1/events/stream")
-async def events_stream(request: Request, _: str = Depends(current_user)):
-    """Server-Sent Events feed for newly detected risk episodes.
-
-    The stream emits one compact snapshot on connect, then only new
-    notifications.  A heartbeat comment keeps proxies from closing an
-    otherwise idle connection; no portfolio payload is resent every tick.
-    """
-
-    async def generate():
-        await asyncio.to_thread(_analyzed_data)
-        last_id = await asyncio.to_thread(latest_event_id)
-        snapshot = await asyncio.to_thread(list_notifications, 12, False)
-        yield _sse_event(
-            "snapshot",
-            {
-                "unreadCount": snapshot["unreadCount"],
-                "criticalCount": snapshot["criticalCount"],
-                "items": snapshot["items"],
-            },
-        )
-        heartbeat_ticks = 0
-        while not await request.is_disconnected():
-            await asyncio.to_thread(_analyzed_data)
-            fresh = await asyncio.to_thread(events_after, last_id)
-            for event in fresh:
-                last_id = max(last_id, int(event["id"]))
-                yield _sse_event("notification", event)
-            heartbeat_ticks += 1
-            if heartbeat_ticks >= 8:
-                heartbeat_ticks = 0
-                yield ": heartbeat\n\n"
-            await asyncio.sleep(2)
-
-    return StreamingResponse(
-        generate(),
-        media_type="text/event-stream",
-        headers={
-            "Cache-Control": "no-cache",
-            "Connection": "keep-alive",
-            "X-Accel-Buffering": "no",
-        },
-    )
-
-
 @app.get("/api/v1/model/settings", response_model=ModelSettingsResponse)
 async def get_settings(_: str = Depends(current_user)):
     with db() as connection:
@@ -770,11 +640,6 @@ async def metrics():
     average_score = (
         sum(rated_scores) / len(rated_scores) if rated_scores else 0.0
     )
-    unread_alerts, critical_alerts = notification_counts()
-    with db() as connection:
-        rescue_totals = rescue_queue(
-            customers, weights=get_weights(connection), limit=1000
-        )["totals"]
     lines = [
         "# HELP churn_customers_total Customers by churn risk level",
         "# TYPE churn_customers_total gauge",
@@ -811,15 +676,6 @@ async def metrics():
                 data["churnForecast"]["days"], data["churnForecast"]["counts"]
             )
         ],
-        "# HELP churn_unread_alerts Unread realtime risk notifications",
-        "# TYPE churn_unread_alerts gauge",
-        f"churn_unread_alerts {unread_alerts}",
-        "# HELP churn_critical_alerts Unread active critical risk notifications",
-        "# TYPE churn_critical_alerts gauge",
-        f"churn_critical_alerts {critical_alerts}",
-        "# HELP churn_rescue_value_eur Expected value of the current rescue queue in euros",
-        "# TYPE churn_rescue_value_eur gauge",
-        f"churn_rescue_value_eur {rescue_totals['rescueValue'] / 100:.2f}",
         "",
     ]
     return PlainTextResponse(
