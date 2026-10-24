@@ -9,6 +9,7 @@ import { Login } from "./Login";
 import "./styles/tokens.css";
 import "./styles/dashboard.css";
 import "./styles/login.css";
+import "./styles/realtime.css";
 
 // FastAPI keeps the server-side auth gate: "/" is only served to a signed-in
 // session and "/login" only to anonymous visitors, so routing by pathname
