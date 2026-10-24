@@ -21,7 +21,6 @@ declare module "react" {
       "md-outlined-button": MdElementProps;
       "md-text-button": MdElementProps;
       "md-icon-button": MdElementProps;
-      "md-slider": MdElementProps;
       "md-input-chip": MdElementProps;
       "md-circular-progress": MdElementProps;
     }

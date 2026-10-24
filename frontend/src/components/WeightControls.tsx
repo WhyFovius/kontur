@@ -3,6 +3,7 @@ import { motion } from "framer-motion";
 import type { ModelSettings } from "../types";
 import { integer } from "../format";
 import { springEmphasized, staggerChild, staggerParent } from "../motion";
+import { ExpressiveSlider } from "./ExpressiveSlider";
 
 interface WeightControlsProps {
   settings: ModelSettings;
@@ -21,7 +22,8 @@ interface WeightItemProps {
 /**
  * One M3 Expressive slider card. The number field keeps local text state
  * while focused so it can be cleared/retyped; the share bar is a scaleX
- * transform (no layout thrash) and the value chip pops on every change.
+ * transform (no layout thrash), while the custom slider keeps its exact
+ * value visible at rest, on hover, during drag and from the keyboard.
  */
 function WeightItem({
   featureKey,
@@ -44,33 +46,20 @@ function WeightItem({
         <label htmlFor={`weight-${featureKey}`} id={`weight-label-${featureKey}`}>
           {label}
         </label>
-        <motion.span
-          key={value}
-          className="weight-value-chip"
-          initial={{ scale: 0.82, opacity: 0.6 }}
-          animate={{ scale: 1, opacity: 1 }}
-          transition={{ type: "spring", stiffness: 600, damping: 24 }}
-          aria-hidden="true"
-        >
+        <span className="weight-value-chip" aria-hidden="true">
           {integer(value)}
-        </motion.span>
+        </span>
       </div>
       <div className="weight-inputs">
-        <md-slider
-          class="weight-md-slider"
+        <ExpressiveSlider
+          id={`weight-${featureKey}`}
           min={0}
           max={100}
           step={1}
           value={value}
-          labeled
-          data-weight={featureKey}
-          aria-label={`Вес сигнала: ${label}`}
-          onInput={(event: React.SyntheticEvent<HTMLElement>) =>
-            onWeightChange(
-              featureKey,
-              Number((event.target as unknown as { value: number }).value),
-            )
-          }
+          dataWeight={featureKey}
+          label={`Вес сигнала: ${label}`}
+          onChange={(next) => onWeightChange(featureKey, next)}
         />
         <input
           className="weight-number"

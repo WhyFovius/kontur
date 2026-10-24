@@ -1,9 +1,10 @@
 import { useEffect, useState, type RefObject } from "react";
 import { AnimatePresence, motion } from "framer-motion";
-import type { Theme } from "../theme";
-import { springSnappy, springEmphasized, springFollow } from "../motion";
+import type { Theme, ThemeToggleOrigin } from "../theme";
+import { THEME_WAVE_DURATION_MS } from "../theme";
+import { EASE_EMPHASIZED, springSnappy, springEmphasized, springFollow } from "../motion";
 import { useDragSelect } from "./useDragSelect";
-import { AezaLogo, BrandPattern } from "./Brand";
+import { AezaLogo } from "./Brand";
 import {
   IconCheck,
   IconChevron,
@@ -35,33 +36,64 @@ export function ThemeToggle({
   className = "",
 }: {
   theme: Theme;
-  onToggle: () => void;
+  onToggle: (origin: ThemeToggleOrigin) => void;
   className?: string;
 }) {
   const isDark = theme === "dark";
+  const iconTransition = {
+    duration: THEME_WAVE_DURATION_MS / 1000,
+    ease: EASE_EMPHASIZED,
+  };
+
   return (
-    // Google's own toggle icon-button: the sun/moon swap is the
-    // component's built-in selected-slot mechanism, no custom
-    // animation code left to glitch.
-    <md-icon-button
-      toggle
-      selected={isDark}
-      class={`theme-toggle-md ${className}`}
-      onClick={onToggle}
+    <motion.button
+      type="button"
+      className={`theme-toggle-button ${className}`.trim()}
+      aria-pressed={isDark}
       aria-label={
         isDark
           ? "Тёмная тема включена. Переключить на светлую тему"
           : "Светлая тема. Переключить на тёмную тему"
       }
       title={isDark ? "Переключить на светлую тему" : "Переключить на тёмную тему"}
+      whileHover={{ y: -1 }}
+      whileTap={{ scale: 0.92 }}
+      transition={springSnappy}
+      onClick={(event) => {
+        const rect = event.currentTarget.getBoundingClientRect();
+        onToggle({
+          x: rect.left + rect.width / 2,
+          y: rect.top + rect.height / 2,
+        });
+      }}
     >
-      <span className="md-icon-wrap">
-        <IconSun />
+      <span className="theme-toggle-icon-stack" aria-hidden="true">
+        <motion.span
+          className="theme-toggle-icon-layer"
+          initial={false}
+          animate={
+            isDark
+              ? { opacity: 0, rotate: -82, scale: 0.42, y: 5 }
+              : { opacity: 1, rotate: 0, scale: 1, y: 0 }
+          }
+          transition={iconTransition}
+        >
+          <IconSun />
+        </motion.span>
+        <motion.span
+          className="theme-toggle-icon-layer"
+          initial={false}
+          animate={
+            isDark
+              ? { opacity: 1, rotate: 0, scale: 1, y: 0 }
+              : { opacity: 0, rotate: 82, scale: 0.42, y: 5 }
+          }
+          transition={iconTransition}
+        >
+          <IconMoon />
+        </motion.span>
       </span>
-      <span slot="selected" className="md-icon-wrap">
-        <IconMoon />
-      </span>
-    </md-icon-button>
+    </motion.button>
   );
 }
 
@@ -186,7 +218,6 @@ export function Sidebar({
           <span className="sidebar-toggle-label">{collapsed ? "Развернуть" : "Свернуть"}</span>
         </motion.button>
         <div className="sidebar-note">
-          <BrandPattern className="sidebar-pattern" />
           <span
             className={`note-signal${connectionError ? " is-error" : ""}`}
             aria-hidden="true"
@@ -320,7 +351,7 @@ function UpdatedAgo({ at }: { at: number | null }) {
 interface TopbarProps {
   sectionLabel: string;
   theme: Theme;
-  onToggleTheme: () => void;
+  onToggleTheme: (origin: ThemeToggleOrigin) => void;
   connectionError: boolean;
   lastUpdatedAt: number | null;
   uploadPhase: UploadPhase;
