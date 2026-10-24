@@ -4,7 +4,6 @@ import { RISK_LABELS } from "../types";
 import { integer } from "../format";
 import { springEmphasized, springFollow } from "../motion";
 import { AnimatedNumber } from "./AnimatedNumber";
-import { LiquidSurface } from "./LiquidSurface";
 import { useDragSelect } from "./useDragSelect";
 
 interface RiskDonutProps {
@@ -59,7 +58,7 @@ export function RiskDonut({ summary, activeRisk, onSelectRisk }: RiskDonutProps)
   });
 
   return (
-    <LiquidSurface className="risk-content" strength={0.7}>
+    <div className="risk-content">
       <div className="donut-wrap">
         <svg
           className="donut-svg"
@@ -146,6 +145,6 @@ export function RiskDonut({ summary, activeRisk, onSelectRisk }: RiskDonutProps)
           );
         })}
       </div>
-    </LiquidSurface>
+    </div>
   );
 }

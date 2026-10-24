@@ -165,19 +165,6 @@ export const IconClose = (p: IconProps) => (
   </svg>
 );
 
-export const IconBell = (p: IconProps) => (
-  <svg {...base(p)}>
-    <path d="M10 1.8a6 6 0 0 1 6 6v3.2l1.5 2.8a1 1 0 0 1-.9 1.5H3.4a1 1 0 0 1-.9-1.5L4 11V7.8a6 6 0 0 1 6-6Z" />
-    <path d="M7.9 17a2.15 2.15 0 0 0 4.2 0H7.9Z" />
-  </svg>
-);
-
-export const IconBolt = (p: IconProps) => (
-  <svg {...base(p)}>
-    <path d="M11.4 1.7 4.3 11h4.1l-1 7.3L14.7 9h-4.2l.9-7.3Z" />
-  </svg>
-);
-
 export const IconArrowLeft = (p: IconProps) => (
   <svg {...base(p)}>
     <path d="M8.7 3.9 3.4 10l5.3 6.1 1.8-1.6-3.2-3.4h9.9V8.9H7.3l3.2-3.4-1.8-1.6Z" />

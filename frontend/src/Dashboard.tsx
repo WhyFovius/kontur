@@ -5,7 +5,6 @@ import type {
   CustomerList as CustomerListData,
   ChurnTimelineData,
   ModelSettings,
-  RescueQueueData,
   RiskLevel,
   SortKey,
   SortOrder,
@@ -19,12 +18,6 @@ import { fadeRise, pageVariants, springEmphasized, springSnappy } from "./motion
 import { CustomerList, type SavedView } from "./components/CustomerList";
 import { RiskDonut } from "./components/RiskDonut";
 import { ChurnTimeline } from "./components/ChurnTimeline";
-const RealtimeAlerts = lazy(() =>
-  import("./components/RealtimeAlerts").then((m) => ({ default: m.RealtimeAlerts })),
-);
-const RescueQueue = lazy(() =>
-  import("./components/RescueQueue").then((m) => ({ default: m.RescueQueue })),
-);
 const RiskStream = lazy(() =>
   import("./components/RiskStream").then((m) => ({ default: m.RiskStream })),
 );
@@ -292,7 +285,6 @@ export function Dashboard() {
   const [username, setUsername] = useState("Аналитик");
   const [summary, setSummary] = useState<Summary | null>(null);
   const [churnTimeline, setChurnTimeline] = useState<ChurnTimelineData | null>(null);
-  const [rescueQueue, setRescueQueue] = useState<RescueQueueData | null>(null);
   const [customers, setCustomers] = useState<CustomerListData>({ items: [], total: 0 });
   const [topQueue, setTopQueue] = useState<CustomerListData>({ items: [], total: 0 });
   const [settings, setSettings] = useState<ModelSettings | null>(null);
@@ -457,7 +449,6 @@ export function Dashboard() {
         const requests: [
           Promise<Summary>,
           Promise<ChurnTimelineData>,
-          Promise<RescueQueueData>,
           Promise<CustomerListData>,
           Promise<CustomerListData>,
           Promise<CustomerListData>,
@@ -465,13 +456,12 @@ export function Dashboard() {
         ] = [
           api<Summary>("/api/v1/analytics/summary"),
           api<ChurnTimelineData>("/api/v1/analytics/churn-timeline"),
-          api<RescueQueueData>("/api/v1/analytics/rescue-queue?limit=8&minimum_score=65"),
           api<CustomerListData>(`/api/v1/customers?${params}`),
           api<CustomerListData>(`/api/v1/customers?${queueParams}`),
           api<CustomerListData>(`/api/v1/customers?${landscapeParams}`),
           includeSettings ? api<ModelSettings>("/api/v1/model/settings") : Promise.resolve(null),
         ];
-        const [summaryData, timelineData, rescueData, firstPage, queueData, landscapeData, freshSettings] =
+        const [summaryData, timelineData, firstPage, queueData, landscapeData, freshSettings] =
           await Promise.all(requests);
         let customerData = firstPage;
         let nextOffset = effective.offset;
@@ -502,7 +492,6 @@ export function Dashboard() {
           summaryRef.current = summaryData;
           setSummary(summaryData);
           setChurnTimeline(timelineData);
-          setRescueQueue(rescueData);
           setCustomers(customerData);
           setTopQueue(queueData);
           setLandscapeCustomers(landscapeData.items);
@@ -768,18 +757,6 @@ export function Dashboard() {
     [goToPage, reloadWith],
   );
 
-  const openAlertCustomer = useCallback(
-    (id: string, level: RiskLevel | null) => {
-      openCustomer(id, level ?? "high");
-    },
-    [openCustomer],
-  );
-
-  const refreshFromRealtime = useCallback(() => {
-    if (document.visibilityState !== "visible" || refreshPromise.current) return;
-    refreshRef.current(false).catch(() => undefined);
-  }, []);
-
   const showUnrated = useCallback(() => {
     handleRiskChange("unrated");
     goToPage("customers");
@@ -1002,10 +979,6 @@ export function Dashboard() {
       ) : (
         <KpiSkeletons />
       )}
-
-      <Suspense fallback={<PanelSkeleton />}>
-        <RescueQueue data={rescueQueue} onOpenCustomer={openCustomer} />
-      </Suspense>
 
       <Suspense fallback={<PanelSkeleton />}>
         <RiskBars
@@ -1298,12 +1271,6 @@ export function Dashboard() {
       </main>
 
       <MobileNav activeSection={page} onNavigate={goToPage} />
-      <Suspense fallback={null}>
-        <RealtimeAlerts
-          onOpenCustomer={openAlertCustomer}
-          onPortfolioChange={refreshFromRealtime}
-        />
-      </Suspense>
       <Snackbar toast={toast} onClose={() => setToast(null)} />
 
       <AnimatePresence>

@@ -1,13 +1,11 @@
 import hashlib
 import unittest
-from datetime import timedelta
 from pathlib import Path
 
 import yaml
 from fastapi.testclient import TestClient
 
 from churnrisk.api import app
-from churnrisk.domain import iso, utcnow
 from churnrisk.storage import db, replace_snapshot
 
 SNAPSHOT = {
@@ -121,94 +119,6 @@ class ApiTests(unittest.TestCase):
         )
         self.assertIn(
             f"churn_estimated_loss_eur {summary['estimatedLoss'] / 100:.2f}", metrics
-        )
-
-    def test_realtime_notifications_and_rescue_queue(self):
-        self.client.patch(
-            "/api/v1/model/settings",
-            json={
-                "weights": {
-                    "expiring_without_autoprolong": 25,
-                    "insufficient_funds": 25,
-                    "prolong_wait": 25,
-                    "failed_transactions": 12,
-                    "deleted_services": 8,
-                    "balance_pressure": 5,
-                }
-            },
-        )
-        now = utcnow()
-        snapshot = {
-            "accounts": [
-                {
-                    "id": 77,
-                    "email": "rescue@example.org",
-                    "balance": 1000,
-                    "totalReplenished": 12000,
-                }
-            ],
-            "services": [
-                {
-                    "id": "svc-rescue",
-                    "accountId": 77,
-                    "name": "Critical VPS",
-                    "status": "active",
-                    "price": 9000,
-                    "paymentTerm": "month",
-                    "autoprolong": False,
-                    "expiresAt": iso(now + timedelta(days=2)),
-                }
-            ],
-            "transactions": [
-                {
-                    "id": "pay-rescue",
-                    "accountId": 77,
-                    "status": "not_performed",
-                    "type": "prolong",
-                    "amount": 9000,
-                }
-            ],
-        }
-        with db() as connection:
-            connection.execute("DELETE FROM risk_events")
-            connection.execute("DELETE FROM risk_monitor_state")
-            replace_snapshot(connection, snapshot)
-
-        queue = self.client.get("/api/v1/analytics/rescue-queue")
-        self.assertEqual(queue.status_code, 200, queue.text)
-        queue_payload = queue.json()
-        self.assertEqual(queue_payload["items"][0]["customerId"], "77")
-        self.assertEqual(queue_payload["items"][0]["requiredTopUp"], 8000)
-
-        notifications = self.client.get("/api/v1/notifications?limit=20")
-        self.assertEqual(notifications.status_code, 200, notifications.text)
-        payload = notifications.json()
-        self.assertGreater(payload["unreadCount"], 0)
-        self.assertTrue(
-            any(item["customerId"] == "77" for item in payload["items"])
-        )
-        first = payload["items"][0]
-        read = self.client.post(f"/api/v1/notifications/{first['id']}/read")
-        self.assertEqual(read.status_code, 200, read.text)
-        self.assertTrue(read.json()["notification"]["isRead"])
-
-        with self.client.stream("GET", "/api/v1/events/stream") as stream:
-            self.assertEqual(stream.status_code, 200)
-            self.assertTrue(
-                stream.headers["content-type"].startswith("text/event-stream")
-            )
-            lines = []
-            for line in stream.iter_lines():
-                if line:
-                    lines.append(line)
-                if len(lines) >= 2:
-                    break
-            self.assertTrue(any("snapshot" in line for line in lines))
-
-        anonymous = TestClient(app)
-        self.assertEqual(anonymous.get("/api/v1/notifications").status_code, 401)
-        self.assertEqual(
-            anonymous.get("/api/v1/analytics/rescue-queue").status_code, 401
         )
 
     def test_nested_snapshot_import_and_unknown_shape_preserves_data(self):
