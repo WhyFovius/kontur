@@ -189,7 +189,16 @@ paths:
       description: >-
         Validates the entire snapshot before replacing current data. Request
         body is limited to 32 MiB. Every relation must reference an account;
-        monetary fields use integer eurocents.
+        monetary fields use integer eurocents. Accepts accounts/users/customers/clients,
+        services/subscriptions and transactions/payments, directly or inside a
+        data or snapshot object. Services and transactions may also be nested in
+        each account; their owner is then inferred from the account id. Common
+        snake_case field aliases are normalized (email_address, withdraw_balance,
+        bonus_balance, bonus_state, total_replenished, account_id, user_id,
+        customer_id, client_id, payment_term, billing_period, auto_renew, expires_at).
+        Multiple aliases for the same field or collection are rejected. An explicit
+        accounts collection (or alias) is required, including for empty snapshots.
+        Unknown metadata fields are ignored; monetary units and statuses are not inferred.
       security: [{ AdminSession: [] }]
       requestBody:
         required: true

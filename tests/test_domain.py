@@ -83,6 +83,43 @@ class DomainTests(unittest.TestCase):
                 }
             )
 
+    def test_nested_snapshot_matches_flat_snapshot(self):
+        nested = {"data": {"customers": [{
+            "_id": {"$oid": "customer-1"},
+            "email_address": "a@example.org",
+            "bonus_balance": 50,
+            "subscriptions": [{"id": "s1", "status": "active", "price": 100,
+                               "billing_period": "month", "auto_renew": True}],
+            "payments": [{"id": "p1", "status": "performed", "type": "order", "amount": 100}],
+        }]}}
+        expected = {"accounts": [{"id": "customer-1", "email": "a@example.org", "bonusBalance": 50}],
+                    "services": [{"id": "s1", "accountId": "customer-1", "status": "active",
+                                  "price": 100, "paymentTerm": "month", "autoprolong": True}],
+                    "transactions": [{"id": "p1", "accountId": "customer-1", "status": "performed",
+                                      "type": "order", "amount": 100}]}
+        self.assertEqual(validate_snapshot(nested), validate_snapshot(expected))
+        from churnrisk.schemas import SnapshotRequest
+        self.assertEqual(validate_snapshot(SnapshotRequest.model_validate(nested).model_dump()),
+                         validate_snapshot(expected))
+
+    def test_ambiguous_or_unknown_snapshot_is_rejected(self):
+        for snapshot in (
+            {}, {"records": []}, {"accounts": [], "users": []},
+            {"data": {"accounts": []}, "accounts": []},
+            {"accounts": [{"id": 1, "_id": 2}]},
+            {"accounts": [{"id": 1, "services": [{"accountId": 2}]}]},
+        ):
+            with self.subTest(snapshot=snapshot), self.assertRaises(SnapshotValidationError):
+                validate_snapshot(snapshot)
+
+    def test_nested_records_obey_combined_limit(self):
+        from unittest.mock import patch
+        snapshot = {"accounts": [{"id": 1, "services": [{"id": "nested", "status": "active"}]}],
+                    "services": [{"id": "flat", "accountId": 1, "status": "active"}]}
+        with patch("churnrisk.storage.MAX_SERVICES", 1):
+            with self.assertRaises(SnapshotValidationError):
+                validate_snapshot(snapshot)
+
     def test_invalid_amounts_and_duplicate_ids_are_rejected(self):
         for snapshot in (
             {"accounts": [{"id": 1, "balance": float("nan")}]},

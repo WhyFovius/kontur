@@ -121,6 +121,23 @@ class ApiTests(unittest.TestCase):
             f"churn_estimated_loss_eur {summary['estimatedLoss'] / 100:.2f}", metrics
         )
 
+    def test_nested_snapshot_import_and_unknown_shape_preserves_data(self):
+        response = self.client.put("/api/v1/source/snapshot", json={
+            "snapshot": {"clients": [{
+                "id": 42, "email_address": "nested@example.org", "balance": 0,
+                "subscriptions": [{"status": "active", "price": 250, "payment_term": "month"}],
+            }]},
+        })
+        self.assertEqual(response.status_code, 200, response.text)
+        customers = self.client.get("/api/v1/customers").json()
+        self.assertEqual(customers["total"], 1)
+        self.assertEqual(customers["items"][0]["monthlyRevenue"], 250)
+        for invalid in ({"records": []}, {"accounts": [], "users": []}):
+            with self.subTest(invalid=invalid):
+                response = self.client.put("/api/v1/source/snapshot", json=invalid)
+                self.assertEqual(response.status_code, 422, response.text)
+                self.assertEqual(self.client.get("/api/v1/customers").json()["total"], 1)
+
     def test_invalid_snapshot_does_not_delete_current_data(self):
         response = self.client.put(
             "/api/v1/source/snapshot",

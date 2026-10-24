@@ -349,11 +349,14 @@ def _related_rows(rows: Any, table: str, account_ids: set[str]) -> list[dict[str
 
 
 def validate_snapshot(snapshot: dict[str, Any]) -> dict[str, list[dict[str, Any]]]:
-    if not isinstance(snapshot, dict):
-        raise SnapshotValidationError("Снимок должен быть JSON-объектом")
-    accounts_source = snapshot.get("accounts", snapshot.get("users", []))
-    accounts, account_ids = _account_rows(accounts_source)
-    services = _related_rows(snapshot.get("services", []), "services", account_ids)
+    from .snapshot import normalize_snapshot
+
+    try:
+        snapshot = normalize_snapshot(snapshot)
+    except ValueError as error:
+        raise SnapshotValidationError(str(error)) from error
+    accounts, account_ids = _account_rows(snapshot["accounts"])
+    services = _related_rows(snapshot["services"], "services", account_ids)
     transactions = _related_rows(
         snapshot.get("transactions", []), "transactions", account_ids
     )

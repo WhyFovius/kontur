@@ -30,11 +30,10 @@ class SnapshotRequest(BaseModel):
 
     @model_validator(mode="before")
     @classmethod
-    def accept_legacy_users_key(cls, value: Any) -> Any:
-        if isinstance(value, dict) and "accounts" not in value and "users" in value:
-            value = {**value, "accounts": value["users"]}
-            value.pop("users", None)
-        return value
+    def normalize_input(cls, value: Any) -> Any:
+        from .snapshot import normalize_snapshot
+
+        return normalize_snapshot(value)
 
 
 class SettingsPatch(BaseModel):
