@@ -353,7 +353,7 @@ def validate_snapshot(snapshot: dict[str, Any]) -> dict[str, list[dict[str, Any]
 
     try:
         snapshot = normalize_snapshot(snapshot)
-    except ValueError as error:
+    except (ValueError, TypeError) as error:
         raise SnapshotValidationError(str(error)) from error
     accounts, account_ids = _account_rows(snapshot["accounts"])
     services = _related_rows(snapshot["services"], "services", account_ids)

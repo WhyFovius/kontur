@@ -267,7 +267,7 @@
   --md-filled-button-container-shape-start-start: 18px;
   --md-filled-button-container-shape-start-end: 18px;
   --md-filled-button-container-shape-end-end: 18px;
-  --md-filled-button-container-shape-end-start: 10px;
+  --md-filled-button-container-shape-end-start: 18px;
 }
 .login-submit-success { background: var(--brand-sky); color: #001a26; }
 
