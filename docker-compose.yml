@@ -9,6 +9,14 @@ services:
       ADMIN_PASSWORD: ${ADMIN_PASSWORD:?Set ADMIN_PASSWORD in .env before starting}
       COOKIE_SECURE: ${COOKIE_SECURE:-false}
       DATABASE_PATH: /app/data/churn.db
+      DATABASE_URL: ${DATABASE_URL:-}
+      DATABASE_POOL_MAX: ${DATABASE_POOL_MAX:-10}
+      DATABASE_CONNECT_TIMEOUT_SECONDS: ${DATABASE_CONNECT_TIMEOUT_SECONDS:-5}
+      SQLITE_JOURNAL_MODE: ${SQLITE_JOURNAL_MODE:-WAL}
+      SQLITE_SYNCHRONOUS: ${SQLITE_SYNCHRONOUS:-NORMAL}
+      SQLITE_BUSY_TIMEOUT_MS: ${SQLITE_BUSY_TIMEOUT_MS:-15000}
+      SQLITE_CACHE_SIZE_KIB: ${SQLITE_CACHE_SIZE_KIB:-16384}
+      ANALYSIS_CACHE_TTL_SECONDS: ${ANALYSIS_CACHE_TTL_SECONDS:-10}
       OIDC_ISSUER: ${OIDC_ISSUER:-}
       OIDC_CLIENT_ID: ${OIDC_CLIENT_ID:-}
       OIDC_CLIENT_SECRET: ${OIDC_CLIENT_SECRET:-}
@@ -28,3 +36,26 @@ services:
       timeout: 5s
       retries: 3
       start_period: 10s
+
+  # Optional Stage-2 database. SQLite stays the default when DATABASE_URL
+  # is empty. Start this profile first, then start churn-risk with
+  # DATABASE_URL=postgresql://<user>:<password>@postgres:5432/<db>.
+  postgres:
+    image: postgres:16-alpine
+    profiles: ["postgres"]
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-kontur}
+      POSTGRES_USER: ${POSTGRES_USER:-kontur}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env before starting PostgreSQL}
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+
+volumes:
+  postgres-data:

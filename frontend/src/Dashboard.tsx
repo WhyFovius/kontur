@@ -341,22 +341,37 @@ export function Dashboard() {
           limit: "100",
           offset: "0",
         });
+        const canDeriveCustomerPage =
+          effective.sort === "score" &&
+          effective.order === "desc" &&
+          !effective.risk &&
+          effective.offset + PAGE_SIZE <= 100;
         const requests: [
           Promise<Summary>,
           Promise<RescueQueueData>,
-          Promise<CustomerListData>,
+          Promise<CustomerListData | null>,
           Promise<CustomerListData>,
           Promise<ModelSettings | null>,
         ] = [
           api<Summary>("/api/v1/analytics/summary"),
           api<RescueQueueData>("/api/v1/analytics/rescue-queue?limit=8&minimum_score=65"),
-          api<CustomerListData>(`/api/v1/customers?${params}`),
+          canDeriveCustomerPage
+            ? Promise.resolve(null)
+            : api<CustomerListData>(`/api/v1/customers?${params}`),
           api<CustomerListData>(`/api/v1/customers?${landscapeParams}`),
           includeSettings ? api<ModelSettings>("/api/v1/model/settings") : Promise.resolve(null),
         ];
         const [summaryData, rescueData, firstPage, landscapeData, freshSettings] =
           await Promise.all(requests);
-        let customerData = firstPage;
+        let customerData =
+          firstPage ??
+          {
+            items: landscapeData.items.slice(
+              effective.offset,
+              effective.offset + PAGE_SIZE,
+            ),
+            total: landscapeData.total,
+          };
         let nextOffset = effective.offset;
         if (effective.offset > 0 && effective.offset >= customerData.total) {
           nextOffset = customerData.total
@@ -368,7 +383,18 @@ export function Dashboard() {
         }
 
         // Avoid pointless re-renders (and re-animations) on identical polls.
-        const signature = JSON.stringify([summaryData, rescueData, customerData, landscapeData, freshSettings]);
+        // generatedAt changes on every backend refresh even when the
+        // portfolio itself is byte-identical, so it is not part of the
+        // change signature.
+        const rescueSignature: Partial<RescueQueueData> = { ...rescueData };
+        delete rescueSignature.generatedAt;
+        const signature = JSON.stringify([
+          summaryData,
+          rescueSignature,
+          customerData,
+          landscapeData,
+          freshSettings,
+        ]);
         if (signature !== signatureRef.current) {
           signatureRef.current = signature;
           const previous = summaryRef.current;
