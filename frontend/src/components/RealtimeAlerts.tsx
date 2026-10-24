@@ -77,6 +77,10 @@ export function RealtimeAlerts({ onOpenCustomer, onPortfolioChange }: RealtimeAl
   const [connected, setConnected] = useState(false);
   const [thought, setThought] = useState<RiskNotification | null>(null);
   const [minimumScore, setMinimumScore] = useState(65);
+  const [criticalOnly, setCriticalOnly] = useState(false);
+  const [stampingIds, setStampingIds] = useState<Set<number>>(() => new Set());
+  const dismissedIdsRef = useRef<Set<number>>(new Set());
+  const stampTimersRef = useRef<number[]>([]);
   const knownMaxIdRef = useRef(0);
   const initializedRef = useRef(false);
   const thoughtTimerRef = useRef<number | null>(null);
@@ -89,10 +93,31 @@ export function RealtimeAlerts({ onOpenCustomer, onPortfolioChange }: RealtimeAl
 
   const mergeItems = useCallback((incoming: RiskNotification[]) => {
     setItems((previous) => {
-      const byId = new Map(previous.map((item) => [item.id, item]));
-      incoming.forEach((item) => byId.set(item.id, item));
+      const byId = new Map(
+        previous
+          .filter((item) => !dismissedIdsRef.current.has(item.id))
+          .map((item) => [item.id, item]),
+      );
+      incoming
+        .filter((item) => !dismissedIdsRef.current.has(item.id))
+        .forEach((item) => byId.set(item.id, item));
       return sortNotifications([...byId.values()]).slice(0, 80);
     });
+  }, []);
+
+  const stampAndDismiss = useCallback((ids: number[], delay = 1080) => {
+    if (ids.length === 0) return;
+    setStampingIds((previous) => new Set([...previous, ...ids]));
+    const timer = window.setTimeout(() => {
+      ids.forEach((id) => dismissedIdsRef.current.add(id));
+      setItems((previous) => previous.filter((item) => !ids.includes(item.id)));
+      setStampingIds((previous) => {
+        const next = new Set(previous);
+        ids.forEach((id) => next.delete(id));
+        return next;
+      });
+    }, delay);
+    stampTimersRef.current.push(timer);
   }, []);
 
   const acceptIncoming = useCallback(
@@ -173,10 +198,11 @@ export function RealtimeAlerts({ onOpenCustomer, onPortfolioChange }: RealtimeAl
       source.close();
       window.clearInterval(fallback);
       if (thoughtTimerRef.current) window.clearTimeout(thoughtTimerRef.current);
+      stampTimersRef.current.forEach((timer) => window.clearTimeout(timer));
     };
   }, [acceptIncoming, load]);
 
-  const markRead = useCallback(async (item: RiskNotification) => {
+  const markRead = useCallback(async (item: RiskNotification, stamp = false) => {
     if (item.isRead) return;
     try {
       const result = await api<NotificationReadResult>(
@@ -196,10 +222,11 @@ export function RealtimeAlerts({ onOpenCustomer, onPortfolioChange }: RealtimeAl
       if (item.severity === "critical") {
         setCriticalCount((count) => Math.max(0, count - 1));
       }
+      if (stamp) stampAndDismiss([item.id], 920);
     } catch {
       /* The stream/list will reconcile on the next successful sync. */
     }
-  }, []);
+  }, [stampAndDismiss]);
 
   const openItem = useCallback(
     (item: RiskNotification) => {
@@ -212,6 +239,7 @@ export function RealtimeAlerts({ onOpenCustomer, onPortfolioChange }: RealtimeAl
   );
 
   const markAll = useCallback(async () => {
+    const unreadIds = items.filter((item) => !item.isRead).map((item) => item.id);
     try {
       const result = await api<NotificationReadResult>("/api/v1/notifications/read-all", {
         method: "POST",
@@ -222,17 +250,24 @@ export function RealtimeAlerts({ onOpenCustomer, onPortfolioChange }: RealtimeAl
         sortNotifications(previous.map((item) => ({ ...item, isRead: true }))),
       );
       setThought(null);
+      stampAndDismiss(unreadIds, 1180);
     } catch {
       /* Keep the current list; the next sync will retry. */
     }
-  }, []);
+  }, [items, stampAndDismiss]);
 
   const visibleItems = useMemo(
     () =>
       items.filter(
-        (item) => item.score == null || item.score >= minimumScore || item.severity === "critical",
+        (item) =>
+          (!criticalOnly || item.severity === "critical") &&
+          (item.score == null || item.score >= minimumScore || item.severity === "critical"),
       ),
-    [items, minimumScore],
+    [criticalOnly, items, minimumScore],
+  );
+  const focusItem = useMemo(
+    () => visibleItems.find((item) => !item.isRead) ?? null,
+    [visibleItems],
   );
   const mascotPose = criticalCount > 0 ? "business" : "calm";
 
@@ -261,7 +296,12 @@ export function RealtimeAlerts({ onOpenCustomer, onPortfolioChange }: RealtimeAl
                 {thought.message}
               </span>
               <small>
-                {thought.score != null ? `скор ${integer(thought.score)} · ` : ""}
+                {thought.mode ? `${thought.mode} · ` : ""}
+                {thought.previousScore != null && thought.score != null
+                  ? `риск ${integer(thought.previousScore)} → ${integer(thought.score)} · `
+                  : thought.score != null
+                    ? `скор ${integer(thought.score)} · `
+                    : ""}
                 под риском {money(thought.estimatedLoss)}
               </small>
             </button>
@@ -289,15 +329,29 @@ export function RealtimeAlerts({ onOpenCustomer, onPortfolioChange }: RealtimeAl
             transition={{ default: springEmphasized, opacity: springExEffects }}
           >
             <header className="alerts-panel-head">
-              <span className="alerts-avatar" aria-hidden="true">
+              <button
+                type="button"
+                className={`alerts-avatar alerts-avatar-button${criticalOnly ? " is-active" : ""}`}
+                onClick={() => setCriticalOnly((value) => !value)}
+                aria-pressed={criticalOnly}
+                aria-label={criticalOnly ? "Показать все уведомления" : "Показать только критические уведомления"}
+                title={criticalOnly ? "Показать все" : "Только критично"}
+              >
                 <MascotImage pose={mascotPose} className="alerts-mascot-img" />
-              </span>
+              </button>
               <div>
                 <strong>Мысли Aéza-тян</strong>
                 <span>
                   <i className={`alerts-live-dot${connected ? " is-live" : ""}`} aria-hidden="true" />
                   {connected ? "мониторинг в реальном времени" : "переподключение…"}
                 </span>
+                <small className="alerts-mood">
+                  {criticalOnly
+                    ? "Показываю только критичное"
+                    : criticalCount > 0
+                      ? "Я нашла, с кого начать"
+                      : "Слежу за портфелем"}
+                </small>
               </div>
               <button
                 type="button"
@@ -328,6 +382,30 @@ export function RealtimeAlerts({ onOpenCustomer, onPortfolioChange }: RealtimeAl
               </label>
             </div>
 
+            {focusItem && (
+              <motion.div
+                className={`alerts-focus alerts-severity-${focusItem.severity}`}
+                initial={{ opacity: 0, y: 8, scale: 0.98 }}
+                animate={{ opacity: 1, y: 0, scale: 1 }}
+                transition={springSnappy}
+              >
+                <span className="alerts-focus-mascot" aria-hidden="true">
+                  <MascotImage pose={mascotPose} className="alerts-mascot-img" />
+                </span>
+                <div>
+                  <span>Фокус Aéza-тян {focusItem.mode ? `· ${focusItem.mode}` : ""}</span>
+                  <strong>{focusItem.customerEmail ?? focusItem.title}</strong>
+                  <small>
+                    {focusItem.previousScore != null && focusItem.score != null
+                      ? `риск ${integer(focusItem.previousScore)} → ${integer(focusItem.score)} · `
+                      : ""}
+                    {money(focusItem.estimatedLoss)} под угрозой
+                  </small>
+                </div>
+                <button type="button" onClick={() => openItem(focusItem)}>Открыть</button>
+              </motion.div>
+            )}
+
             <div className="alerts-list">
               {visibleItems.length === 0 ? (
                 <div className="alerts-empty">
@@ -337,25 +415,56 @@ export function RealtimeAlerts({ onOpenCustomer, onPortfolioChange }: RealtimeAl
                 </div>
               ) : (
                 visibleItems.map((item) => (
-                  <button
+                  <article
                     key={item.id}
-                    type="button"
-                    className={`alerts-item alerts-severity-${item.severity}${item.isRead ? " is-read" : ""}`}
-                    onClick={() => openItem(item)}
+                    className={`alerts-item alerts-severity-${item.severity}${item.isRead ? " is-read" : ""}${stampingIds.has(item.id) ? " is-stamping" : ""}`}
                   >
-                    <span className="alerts-item-top">
-                      <span className="alerts-severity">{SEVERITY_LABEL[item.severity]}</span>
-                      <time>{relativeTime(item.firstSeenAt)}</time>
-                    </span>
-                    <strong>{item.title}</strong>
-                    <span>{item.message}</span>
-                    <small>
-                      {item.customerEmail ?? "Весь портфель"}
-                      {item.score != null ? ` · скор ${integer(item.score)}` : ""} · {money(item.estimatedLoss)}
-                      {item.requiredTopUp ? ` · пополнить ${money(item.requiredTopUp)}` : ""}
-                      {item.resolvedAt ? " · уже разрешено" : ""}
-                    </small>
-                  </button>
+                    <button type="button" className="alerts-item-main" onClick={() => openItem(item)}>
+                      <span className="alerts-item-top">
+                        <span className="alerts-severity">{SEVERITY_LABEL[item.severity]}</span>
+                        {item.mode && <span className="alerts-mode">{item.mode}</span>}
+                        <time>{relativeTime(item.firstSeenAt)}</time>
+                      </span>
+                      <strong>{item.title}</strong>
+                      <span>{item.message}</span>
+                      <small>
+                        {item.customerEmail ?? "Весь портфель"}
+                        {item.previousScore != null && item.score != null
+                          ? ` · риск ${integer(item.previousScore)} → ${integer(item.score)}`
+                          : item.score != null
+                            ? ` · скор ${integer(item.score)}`
+                            : ""} · {money(item.estimatedLoss)}
+                        {item.requiredTopUp ? ` · пополнить ${money(item.requiredTopUp)}` : ""}
+                        {item.resolvedAt && !item.eventId ? " · уже разрешено" : ""}
+                        {item.isRead ? " · прочитано" : ""}
+                      </small>
+                    </button>
+                    {!item.isRead && (
+                      <button
+                        type="button"
+                        className="alerts-stamp-button"
+                        onClick={() => void markRead(item, true)}
+                        aria-label={`Отметить уведомление «${item.title}» прочитанным`}
+                        title="Поставить штамп «ПРОЧИТАНО»"
+                      >
+                        <IconCheck />
+                      </button>
+                    )}
+                    <AnimatePresence>
+                      {stampingIds.has(item.id) && (
+                        <motion.span
+                          className="alerts-read-stamp"
+                          aria-hidden="true"
+                          initial={{ opacity: 0, scale: 2.35, rotate: -24 }}
+                          animate={{ opacity: 1, scale: 1, rotate: -11 }}
+                          exit={{ opacity: 0, scale: 0.86, rotate: -8 }}
+                          transition={springSnappy}
+                        >
+                          ПРОЧИТАНО
+                        </motion.span>
+                      )}
+                    </AnimatePresence>
+                  </article>
                 ))
               )}
             </div>
@@ -380,6 +489,7 @@ export function RealtimeAlerts({ onOpenCustomer, onPortfolioChange }: RealtimeAl
         whileTap={{ scale: 0.94 }}
         transition={springSnappy}
       >
+        {criticalCount > 0 && <span className="alerts-fab-pulse" aria-hidden="true" />}
         <span className="alerts-fab-mascot" aria-hidden="true">
           <MascotImage pose={mascotPose} className="alerts-mascot-img" />
         </span>

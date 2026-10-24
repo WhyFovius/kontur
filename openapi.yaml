@@ -263,6 +263,192 @@ paths:
             text/event-stream:
               schema: { type: string }
         '401': { $ref: '#/components/responses/Unauthorized' }
+  /api/v1/realtime/status:
+    get:
+      tags: [Realtime]
+      summary: Get realtime source, DEMO simulator and threshold status
+      security: [{ AdminSession: [] }]
+      responses:
+        '200':
+          description: Honest DEMO/LIVE adapter status and active thresholds.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/RealtimeStatusResponse' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+  /api/v1/demo/generate:
+    post:
+      tags: [Realtime]
+      summary: Generate and process one DEMO event through the backend pipeline
+      security: [{ AdminSession: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/DemoGenerateRequest' }
+      responses:
+        '200':
+          description: Persisted processed event; repeated eventId returns the duplicate.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/RealtimeEvent' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/Unauthorized' }
+        '422': { $ref: '#/components/responses/ValidationError' }
+        '429': { $ref: '#/components/responses/ValidationError' }
+  /api/v1/demo/simulator/start:
+    post:
+      tags: [Realtime]
+      summary: Start the DEMO event simulator
+      security: [{ AdminSession: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/SimulatorStartRequest' }
+      responses:
+        '200':
+          description: Simulator status.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/SimulatorActionResponse' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '422': { $ref: '#/components/responses/ValidationError' }
+  /api/v1/demo/simulator/stop:
+    post:
+      tags: [Realtime]
+      summary: Stop the DEMO event simulator
+      security: [{ AdminSession: [] }]
+      responses:
+        '200':
+          description: Simulator status.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/SimulatorActionResponse' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+  /api/v1/demo/reset:
+    post:
+      tags: [Realtime]
+      summary: Reset DEMO events, calculations and simulated reactions only
+      security: [{ AdminSession: [] }]
+      responses:
+        '200':
+          description: Deleted DEMO row counts. Live snapshot data is untouched.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/DemoResetResponse' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+  /api/v1/realtime/events:
+    get:
+      tags: [Realtime]
+      summary: List persisted realtime events with filters
+      security: [{ AdminSession: [] }]
+      parameters:
+        - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 200, default: 50 } }
+        - { name: offset, in: query, schema: { type: integer, minimum: 0, default: 0 } }
+        - { name: severity, in: query, schema: { type: string, enum: [critical, warning, info] } }
+        - { name: event_type, in: query, schema: { type: string, maxLength: 80 } }
+        - { name: customer_id, in: query, schema: { type: string, maxLength: 160 } }
+        - { name: mode, in: query, schema: { type: string, enum: [DEMO, LIVE] } }
+        - { name: source, in: query, schema: { type: string, maxLength: 40 } }
+        - { name: q, in: query, schema: { type: string, maxLength: 160 } }
+      responses:
+        '200':
+          description: Newest events first and the replay cursor.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/RealtimeEventListResponse' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '422': { $ref: '#/components/responses/ValidationError' }
+  /api/v1/realtime/customers/{customer_id}/history:
+    get:
+      tags: [Realtime]
+      summary: Get one customer's event and risk-calculation history
+      security: [{ AdminSession: [] }]
+      parameters:
+        - { name: customer_id, in: path, required: true, schema: { type: string } }
+        - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 200, default: 50 } }
+      responses:
+        '200':
+          description: Flight Recorder history for the customer.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/CustomerRealtimeHistoryResponse' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+  /api/v1/realtime/dashboard:
+    get:
+      tags: [Realtime]
+      summary: Get realtime monitoring aggregates and saved-history series
+      security: [{ AdminSession: [] }]
+      parameters:
+        - { name: hours, in: query, schema: { type: integer, minimum: 1, maximum: 720, default: 24 } }
+      responses:
+        '200':
+          description: Current distribution plus actual saved calculation/event series.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/RealtimeDashboardResponse' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+  /api/v1/realtime/templates:
+    get:
+      tags: [Realtime]
+      summary: List automatic reaction templates
+      security: [{ AdminSession: [] }]
+      responses:
+        '200':
+          description: Reaction templates ordered by priority.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ReactionTemplateListResponse' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+  /api/v1/realtime/templates/{template_id}:
+    patch:
+      tags: [Realtime]
+      summary: Update a reaction template
+      security: [{ AdminSession: [] }]
+      parameters:
+        - { name: template_id, in: path, required: true, schema: { type: string } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ReactionTemplatePatch' }
+      responses:
+        '200':
+          description: Updated reaction template.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ReactionTemplate' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/Unauthorized' }
+        '422': { $ref: '#/components/responses/ValidationError' }
+  /api/v1/realtime/outbox:
+    get:
+      tags: [Realtime]
+      summary: List queued or simulated reaction messages
+      security: [{ AdminSession: [] }]
+      parameters:
+        - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 200, default: 50 } }
+      responses:
+        '200':
+          description: Reaction outbox; DEMO sends are explicitly simulated_sent.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ReactionOutboxResponse' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+  /api/v1/realtime/stream:
+    get:
+      tags: [Realtime]
+      summary: Replayable Server-Sent Events stream of persisted realtime events
+      security: [{ AdminSession: [] }]
+      parameters:
+        - { name: last_event_id, in: query, schema: { type: integer, minimum: 0, default: 0 } }
+      responses:
+        '200':
+          description: Ready/replay events, then new realtime_event messages with SSE ids and heartbeats.
+          content:
+            text/event-stream:
+              schema: { type: string }
+        '401': { $ref: '#/components/responses/Unauthorized' }
   /api/v1/model/settings:
     get:
       tags: [Model]
@@ -483,6 +669,11 @@ components:
         estimatedLoss: { type: integer, description: Eurocents. }
         daysToExpiry: { type: [number, 'null'] }
         requiredTopUp: { type: [integer, 'null'], description: Eurocents. }
+        source: { type: string, example: demo }
+        mode: { type: string, enum: [LIVE, DEMO] }
+        eventId: { type: [string, 'null'] }
+        previousScore: { type: [integer, 'null'] }
+        riskDelta: { type: [number, 'null'] }
         firstSeenAt: { type: string, format: date-time }
         lastSeenAt: { type: string, format: date-time }
         readAt: { type: [string, 'null'], format: date-time }
@@ -597,6 +788,16 @@ components:
               bonusBalance: { type: integer, minimum: 0, description: Eurocents. }
               bonusState: { type: boolean }
               totalReplenished: { type: integer, minimum: 0, description: Eurocents. }
+              telegram: { type: string, maxLength: 160, description: Optional reaction contact; never returned by customer endpoints. }
+              whatsapp: { type: string, maxLength: 160, description: Optional reaction contact; never returned by customer endpoints. }
+              vk: { type: string, maxLength: 160, description: Optional reaction contact; never returned by customer endpoints. }
+              socials:
+                type: object
+                description: Optional nested reaction contacts.
+                properties:
+                  telegram: { type: string, maxLength: 160 }
+                  whatsapp: { type: string, maxLength: 160 }
+                  vk: { type: string, maxLength: 160 }
         users:
           type: array
           description: Legacy alias for accounts.
@@ -629,3 +830,203 @@ components:
               status: { type: string, enum: [performed, not_performed] }
               type: { type: string, enum: [prolong, order] }
               amount: { type: integer, minimum: 0, description: Eurocents. }
+    DemoGenerateRequest:
+      type: object
+      additionalProperties: false
+      required: [scenario]
+      properties:
+        scenario: { type: string, enum: [NORMAL_ACTIVITY, ACTIVITY_DROP, CHURN_RISK_SPIKE, HIGH_RISK_THRESHOLD, CUSTOMER_RECOVERY, NEW_CUSTOMER_ACTIVITY] }
+        customerId: { type: [string, 'null'], maxLength: 160 }
+        eventId: { type: [string, 'null'], minLength: 1, maxLength: 120 }
+    SimulatorStartRequest:
+      type: object
+      additionalProperties: false
+      properties:
+        intervalSeconds: { type: number, minimum: 2, maximum: 60, default: 5 }
+        scenario: { type: string, enum: [NORMAL_ACTIVITY, ACTIVITY_DROP, CHURN_RISK_SPIKE, HIGH_RISK_THRESHOLD, CUSTOMER_RECOVERY, NEW_CUSTOMER_ACTIVITY, MIXED], default: MIXED }
+    ReactionTemplatePatch:
+      type: object
+      additionalProperties: false
+      properties:
+        enabled: { type: [boolean, 'null'] }
+        subject: { type: [string, 'null'], minLength: 1, maxLength: 240 }
+        body: { type: [string, 'null'], minLength: 1, maxLength: 4000 }
+        cooldownSeconds: { type: [integer, 'null'], minimum: 0, maximum: 86400 }
+        channelStrategy: { type: [string, 'null'], enum: [social_first, email_first, null] }
+    ReactionAction:
+      type: object
+      required: [id, eventId, templateId, channel, subject, body, status, mode, createdAt]
+      properties:
+        id: { type: integer }
+        eventId: { type: string }
+        templateId: { type: string }
+        customerId: { type: [string, 'null'] }
+        channel: { type: string, example: telegram }
+        recipient: { type: [string, 'null'] }
+        subject: { type: string }
+        body: { type: string }
+        status: { type: string, example: simulated_sent }
+        mode: { type: string, example: DEMO }
+        createdAt: { type: string, format: date-time }
+        sentAt: { type: [string, 'null'], format: date-time }
+        error: { type: [string, 'null'] }
+    RealtimeEvent:
+      type: object
+      required: [id, eventId, type, source, mode, timestamp, severity, riskScore, riskPercent, riskLevel, riskDelta, reason, reasons, details, processed, notificationCreated, createdAt]
+      properties:
+        id: { type: integer }
+        eventId: { type: string }
+        type: { type: string }
+        source: { type: string }
+        mode: { type: string, enum: [LIVE, DEMO] }
+        scenario: { type: [string, 'null'] }
+        customerId: { type: [string, 'null'] }
+        customerEmail: { type: [string, 'null'] }
+        timestamp: { type: string, format: date-time }
+        severity: { type: string, enum: [critical, warning, info] }
+        previousRiskScore: { type: [number, 'null'], minimum: 0, maximum: 1 }
+        riskScore: { type: number, minimum: 0, maximum: 1 }
+        riskPercent: { type: integer, minimum: 0, maximum: 100 }
+        riskLevel: { type: string }
+        riskDelta: { type: number, minimum: -1, maximum: 1 }
+        reason: { type: string }
+        reasons: { type: array, items: { type: string } }
+        details: { type: object, additionalProperties: true }
+        processed: { type: boolean }
+        notificationCreated: { type: boolean }
+        notificationId: { type: [integer, 'null'] }
+        suppressedReason: { type: [string, 'null'] }
+        actions: { type: array, items: { $ref: '#/components/schemas/ReactionAction' } }
+        duplicate: { type: boolean, default: false }
+        createdAt: { type: string, format: date-time }
+    RealtimeEventListResponse:
+      type: object
+      required: [items, total, latestId, generatedAt]
+      properties:
+        items: { type: array, items: { $ref: '#/components/schemas/RealtimeEvent' } }
+        total: { type: integer }
+        latestId: { type: integer }
+        generatedAt: { type: string, format: date-time }
+    CustomerRealtimeHistoryResponse:
+      type: object
+      required: [customerId, events, calculations]
+      properties:
+        customerId: { type: string }
+        events: { type: array, items: { $ref: '#/components/schemas/RealtimeEvent' } }
+        calculations:
+          type: array
+          items:
+            type: object
+            properties:
+              eventId: { type: string }
+              baseScore: { type: [number, 'null'] }
+              demoModifier: { type: number }
+              previousRiskScore: { type: [number, 'null'] }
+              riskScore: { type: number }
+              riskPercent: { type: integer }
+              riskLevel: { type: string }
+              riskDelta: { type: number }
+              reasons: { type: array, items: { type: string } }
+              source: { type: string }
+              mode: { type: string }
+              isDemo: { type: boolean }
+              calculatedAt: { type: string, format: date-time }
+    RealtimeStatusResponse:
+      type: object
+      required: [generatedAt, sources, simulator, scenarios, thresholds, eventCounts, trackedCustomers, liveAvailable]
+      properties:
+        generatedAt: { type: string, format: date-time }
+        sources: { type: array, items: { type: object } }
+        simulator: { $ref: '#/components/schemas/SimulatorStatus' }
+        scenarios: { type: array, items: { type: object, properties: { id: { type: string }, label: { type: string } } } }
+        thresholds:
+          type: object
+          properties:
+            medium: { type: integer }
+            high: { type: integer }
+            critical: { type: integer }
+            significantDelta: { type: integer }
+            notificationCooldownSeconds: { type: integer }
+        eventCounts:
+          type: object
+          properties:
+            total: { type: integer }
+            demo: { type: integer }
+            live: { type: integer }
+        trackedCustomers: { type: integer }
+        liveAvailable: { type: boolean }
+    SimulatorStatus:
+      type: object
+      required: [running, intervalSeconds, scenario, generatedCount]
+      properties:
+        running: { type: boolean }
+        intervalSeconds: { type: number }
+        scenario: { type: string }
+        generatedCount: { type: integer }
+        lastEventId: { type: [string, 'null'] }
+        lastError: { type: [string, 'null'] }
+        startedAt: { type: [string, 'null'], format: date-time }
+    SimulatorActionResponse:
+      type: object
+      required: [ok, simulator]
+      properties:
+        ok: { type: boolean, const: true }
+        simulator: { $ref: '#/components/schemas/SimulatorStatus' }
+    RealtimeDashboardResponse:
+      type: object
+      required: [generatedAt, periodHours, trackedCustomers, highRiskCustomers, eventsInPeriod, criticalEvents, averageRiskPercent, improvedCustomers, distribution, riskSeries, eventSeries, method]
+      properties:
+        generatedAt: { type: string, format: date-time }
+        periodHours: { type: integer }
+        trackedCustomers: { type: integer }
+        highRiskCustomers: { type: integer }
+        eventsInPeriod: { type: integer }
+        criticalEvents: { type: integer }
+        averageRiskPercent: { type: number }
+        improvedCustomers: { type: integer }
+        distribution:
+          type: object
+          properties:
+            high: { type: integer }
+            medium: { type: integer }
+            low: { type: integer }
+        riskSeries: { type: array, items: { $ref: '#/components/schemas/SeriesPoint' } }
+        eventSeries: { type: array, items: { $ref: '#/components/schemas/SeriesPoint' } }
+        method: { type: string }
+    SeriesPoint:
+      type: object
+      required: [label, value]
+      properties:
+        label: { type: string }
+        value: { type: number }
+    ReactionTemplate:
+      type: object
+      required: [id, name, triggerTypes, minSeverity, channelStrategy, subject, body, enabled, cooldownSeconds, priority, updatedAt]
+      properties:
+        id: { type: string }
+        name: { type: string }
+        triggerTypes: { type: array, items: { type: string } }
+        minSeverity: { type: string }
+        channelStrategy: { type: string }
+        subject: { type: string }
+        body: { type: string }
+        enabled: { type: boolean }
+        cooldownSeconds: { type: integer }
+        priority: { type: integer }
+        updatedAt: { type: string, format: date-time }
+    ReactionTemplateListResponse:
+      type: object
+      required: [items]
+      properties:
+        items: { type: array, items: { $ref: '#/components/schemas/ReactionTemplate' } }
+    ReactionOutboxResponse:
+      type: object
+      required: [items]
+      properties:
+        items: { type: array, items: { $ref: '#/components/schemas/ReactionAction' } }
+    DemoResetResponse:
+      type: object
+      required: [ok, deleted]
+      properties:
+        ok: { type: boolean, const: true }
+        deleted: { type: object, additionalProperties: { type: integer } }

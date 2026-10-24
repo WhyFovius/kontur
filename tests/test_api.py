@@ -1,4 +1,5 @@
 import hashlib
+import time
 import unittest
 from datetime import timedelta
 from pathlib import Path
@@ -210,6 +211,121 @@ class ApiTests(unittest.TestCase):
         self.assertEqual(
             anonymous.get("/api/v1/analytics/rescue-queue").status_code, 401
         )
+
+    def test_demo_realtime_pipeline_is_idempotent_and_reset_isolated(self):
+        reset = self.client.post("/api/v1/demo/reset")
+        self.assertEqual(reset.status_code, 200, reset.text)
+        try:
+            status = self.client.get("/api/v1/realtime/status")
+            self.assertEqual(status.status_code, 200, status.text)
+            status_payload = status.json()
+            self.assertFalse(status_payload["liveAvailable"])
+            self.assertTrue(
+                any(
+                    source["name"] == "demo" and source["available"]
+                    for source in status_payload["sources"]
+                )
+            )
+            generated_before = status_payload["simulator"]["generatedCount"]
+
+            invalid = self.client.post(
+                "/api/v1/demo/generate", json={"scenario": "BOGUS"}
+            )
+            self.assertEqual(invalid.status_code, 422)
+
+            payload = {
+                "scenario": "HIGH_RISK_THRESHOLD",
+                "customerId": "20",
+                "eventId": "evt-test-high-1",
+            }
+            generated = self.client.post("/api/v1/demo/generate", json=payload)
+            self.assertEqual(generated.status_code, 200, generated.text)
+            event = generated.json()
+            self.assertEqual(event["mode"], "DEMO")
+            self.assertGreaterEqual(event["riskPercent"], 80)
+            self.assertTrue(event["notificationCreated"])
+            self.assertEqual(event["actions"][0]["channel"], "email")
+            self.assertEqual(event["actions"][0]["status"], "simulated_sent")
+
+            duplicate = self.client.post("/api/v1/demo/generate", json=payload)
+            self.assertEqual(duplicate.status_code, 200, duplicate.text)
+            self.assertTrue(duplicate.json()["duplicate"])
+            listed = self.client.get("/api/v1/realtime/events?q=evt-test-high-1")
+            self.assertEqual(listed.json()["total"], 1)
+
+            new_customer = self.client.post(
+                "/api/v1/demo/generate",
+                json={
+                    "scenario": "NEW_CUSTOMER_ACTIVITY",
+                    "eventId": "evt-test-new-1",
+                },
+            )
+            self.assertEqual(new_customer.status_code, 200, new_customer.text)
+            self.assertEqual(new_customer.json()["actions"][0]["channel"], "telegram")
+
+            history = self.client.get("/api/v1/realtime/customers/20/history")
+            self.assertEqual(history.status_code, 200, history.text)
+            self.assertEqual(history.json()["calculations"][0]["eventId"], "evt-test-high-1")
+
+            dashboard = self.client.get("/api/v1/realtime/dashboard")
+            self.assertEqual(dashboard.status_code, 200, dashboard.text)
+            self.assertGreaterEqual(dashboard.json()["eventsInPeriod"], 2)
+            self.assertEqual(dashboard.json()["trackedCustomers"], 4)
+
+            notifications = self.client.get("/api/v1/notifications?limit=30").json()
+            self.assertTrue(
+                any(
+                    item.get("eventId") == "evt-test-high-1" and item.get("mode") == "DEMO"
+                    for item in notifications["items"]
+                )
+            )
+
+            cursor = self.client.get("/api/v1/realtime/events?limit=1").json()["latestId"]
+            replayed = self.client.post(
+                "/api/v1/demo/generate",
+                json={
+                    "scenario": "NORMAL_ACTIVITY",
+                    "customerId": "20",
+                    "eventId": "evt-test-replay-1",
+                },
+            )
+            self.assertEqual(replayed.status_code, 200, replayed.text)
+            with self.client.stream(
+                "GET", f"/api/v1/realtime/stream?last_event_id={cursor}"
+            ) as stream:
+                self.assertEqual(stream.status_code, 200)
+                lines = []
+                for line in stream.iter_lines():
+                    if line:
+                        lines.append(line)
+                    if len(lines) >= 3:
+                        break
+                self.assertTrue(any("realtime_event" in line for line in lines))
+                self.assertTrue(any("evt-test-replay-1" in line for line in lines))
+
+            started = self.client.post(
+                "/api/v1/demo/simulator/start",
+                json={"intervalSeconds": 2, "scenario": "NORMAL_ACTIVITY"},
+            )
+            self.assertEqual(started.status_code, 200, started.text)
+            self.assertTrue(started.json()["simulator"]["running"])
+            deadline = time.monotonic() + 3
+            while time.monotonic() < deadline:
+                current = self.client.get("/api/v1/realtime/status").json()
+                if current["simulator"]["generatedCount"] > generated_before:
+                    break
+                time.sleep(0.1)
+            else:
+                self.fail("DEMO simulator did not generate an event")
+        finally:
+            stopped = self.client.post("/api/v1/demo/simulator/stop")
+            self.assertEqual(stopped.status_code, 200, stopped.text)
+            self.assertFalse(stopped.json()["simulator"]["running"])
+            reset = self.client.post("/api/v1/demo/reset")
+            self.assertEqual(reset.status_code, 200, reset.text)
+
+        self.assertEqual(self.client.get("/api/v1/realtime/events").json()["total"], 0)
+        self.assertEqual(self.client.get("/api/v1/customers").json()["total"], 3)
 
     def test_nested_snapshot_import_and_unknown_shape_preserves_data(self):
         response = self.client.put("/api/v1/source/snapshot", json={

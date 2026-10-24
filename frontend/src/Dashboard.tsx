@@ -25,6 +25,9 @@ const RealtimeAlerts = lazy(() =>
 const RescueQueue = lazy(() =>
   import("./components/RescueQueue").then((m) => ({ default: m.RescueQueue })),
 );
+const DevPanel = lazy(() =>
+  import("./components/DevPanel").then((m) => ({ default: m.DevPanel })),
+);
 const RiskStream = lazy(() =>
   import("./components/RiskStream").then((m) => ({ default: m.RiskStream })),
 );
@@ -55,7 +58,7 @@ import { IconArrowRight, IconArrowUpRight, IconChevron, IconUpload } from "./ico
 import { MascotImage, MascotStage, ShapeLoader } from "./components/Brand";
 
 const PAGE_SIZE = 50;
-const PAGE_ORDER: SectionId[] = ["overview", "customers", "model"];
+const PAGE_ORDER: SectionId[] = ["overview", "customers", "model", "live"];
 
 function PanelSkeleton() {
   return (
@@ -1244,6 +1247,39 @@ export function Dashboard() {
     </>
   );
 
+  const livePage = (
+    <>
+      <section className="page-heading page-heading-compact">
+        <div className="page-heading-copy">
+          <span className="eyebrow">
+            <span className="eyebrow-line" aria-hidden="true" />
+            Realtime Operations
+          </span>
+          <h1 ref={setHeadingRef} tabIndex={-1}>
+            Live-монитор<span className="heading-period">.</span>
+          </h1>
+          <p>
+            Разработческая панель событий: DEMO-поток проходит настоящий backend-расчёт,
+            сохраняется в историю, уведомляет Aéza-тян и запускает шаблоны реакций.
+          </p>
+        </div>
+        <div className="heading-side">
+          <span className="date-label">{todayLabel()}</span>
+          <span className="panel-meta">DEMO не изменяет live-снимок</span>
+        </div>
+      </section>
+
+      <Suspense fallback={<PanelSkeleton />}>
+        <DevPanel
+          customers={landscapeCustomers}
+          onOpenCustomer={openAlertCustomer}
+          onPortfolioChange={refreshFromRealtime}
+        />
+      </Suspense>
+      {pageFooter}
+    </>
+  );
+
   /* ---------------- render ---------------- */
 
   return (
@@ -1258,7 +1294,6 @@ export function Dashboard() {
         onNavigate={goToPage}
         customerCount={summary ? integer(summary.customerCount) : "—"}
         username={username}
-        connectionError={connectionError}
         onLogout={() => void logout()}
       />
 
@@ -1269,7 +1304,12 @@ export function Dashboard() {
       >
         <Topbar
           sectionLabel={
-            { overview: "Обзор", customers: "Клиенты", model: "Модель риска" }[page]
+            {
+              overview: "Обзор",
+              customers: "Клиенты",
+              model: "Модель риска",
+              live: "Live-монитор",
+            }[page]
           }
           theme={theme}
           onToggleTheme={toggleTheme}
@@ -1292,7 +1332,13 @@ export function Dashboard() {
             animate="center"
             exit="exit"
           >
-            {page === "overview" ? overviewPage : page === "customers" ? customersPage : modelPage}
+            {page === "overview"
+              ? overviewPage
+              : page === "customers"
+                ? customersPage
+                : page === "model"
+                  ? modelPage
+                  : livePage}
           </motion.div>
         </AnimatePresence>
       </main>
