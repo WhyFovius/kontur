@@ -20,25 +20,25 @@
   position: relative; overflow: hidden; isolation: isolate;
   display: flex; flex-direction: column;
   padding: 30px clamp(26px, 4vw, 58px) 34px;
-  color: #eef6f0;
+  color: #f2edff;
   border-radius: 0 44px 44px 0;
   background:
-    radial-gradient(700px 420px at 88% -8%, rgba(217, 235, 160, .18), transparent 60%),
-    radial-gradient(640px 480px at -12% 108%, rgba(118, 215, 185, .2), transparent 62%),
-    linear-gradient(155deg, #092a20 0%, #0d3d2e 46%, #155f49 100%);
+    radial-gradient(700px 420px at 88% -8%, rgba(233, 197, 107, .18), transparent 60%),
+    radial-gradient(640px 480px at -12% 108%, rgba(167, 139, 250, .2), transparent 62%),
+    linear-gradient(155deg, #0e0626 0%, #241254 46%, #4a2fb0 100%);
 }
 
 .login-orb {
   position: absolute; border-radius: 50%; z-index: -1; pointer-events: none;
-  border: 1px solid rgba(217, 235, 160, .22);
+  border: 1px solid rgba(233, 197, 107, .22);
 }
 .login-orb-one { width: 460px; height: 460px; top: -170px; right: -130px; }
-.login-orb-two { width: 320px; height: 320px; bottom: -120px; left: -90px; border-color: rgba(118, 215, 185, .25); }
+.login-orb-two { width: 320px; height: 320px; bottom: -120px; left: -90px; border-color: rgba(167, 139, 250, .25); }
 
 .login-hero-panel .brand-lockup { padding-left: 0; }
 
 .login-hero-copy { margin-top: clamp(20px, 5vh, 54px); }
-.eyebrow-invert { color: var(--md-brand-lime); }
+.eyebrow-invert { color: var(--md-accent-gold); }
 .login-hero-copy h1 {
   margin: 16px 0 16px;
   font-size: clamp(40px, 4.9vw, 66px); line-height: 1.02;
@@ -47,10 +47,10 @@
 .line-mask { display: block; overflow: hidden; padding-bottom: .08em; margin-bottom: -.08em; }
 .line-mask > span { display: block; will-change: transform; }
 .login-accent-line {
-  background: linear-gradient(92deg, var(--md-brand-lime), #8fe3c3);
+  background: linear-gradient(92deg, var(--md-accent-gold), #cbb9ff);
   -webkit-background-clip: text; background-clip: text; color: transparent;
 }
-.login-hero-copy p { margin: 0; max-width: 480px; font-size: 16.5px; line-height: 1.55; color: rgba(238, 246, 240, .8); }
+.login-hero-copy p { margin: 0; max-width: 480px; font-size: 16.5px; line-height: 1.55; color: rgba(240, 235, 255, .8); }
 
 /* abstract product visual — decorative shapes, no invented customer data */
 .login-visual { position: relative; margin-top: clamp(26px, 4.5vh, 46px); max-width: 470px; }
@@ -68,16 +68,16 @@
 .mock-line { height: 9px; border-radius: 5px; background: rgba(255, 255, 255, .22); display: block; width: 74%; }
 .mock-line-mid { width: 38%; }
 .mock-line-short { width: 52%; }
-.mock-pill { margin-left: auto; width: 74px; height: 22px; border-radius: 999px; background: rgba(217, 235, 160, .28); flex: none; }
+.mock-pill { margin-left: auto; width: 74px; height: 22px; border-radius: 999px; background: rgba(233, 197, 107, .28); flex: none; }
 .mock-bars { display: flex; align-items: flex-end; gap: 7px; height: 76px; margin-top: 6px; }
 .mock-bars span {
   flex: 1; height: 76px; border-radius: 8px 8px 4px 4px; transform-origin: bottom; display: block;
-  background: linear-gradient(180deg, rgba(217, 235, 160, .9), rgba(118, 215, 185, .3));
+  background: linear-gradient(180deg, rgba(233, 197, 107, .9), rgba(167, 139, 250, .3));
 }
 .mock-chip {
   position: absolute; padding: 9px 15px; border-radius: 999px;
   font-size: 12.5px; font-weight: 750; white-space: nowrap;
-  background: rgba(255, 255, 255, .95); color: #12372a;
+  background: rgba(255, 255, 255, .95); color: #241254;
   box-shadow: 0 18px 34px -14px rgba(0, 0, 0, .5);
 }
 .mock-chip-one { top: -20px; right: 6%; }
@@ -86,7 +86,7 @@
 .login-note {
   margin-top: auto; padding-top: 34px;
   display: flex; align-items: center; gap: 10px;
-  font-size: 13px; font-weight: 650; color: rgba(238, 246, 240, .75);
+  font-size: 13px; font-weight: 650; color: rgba(240, 235, 255, .75);
 }
 
 /* ---------- form ---------- */

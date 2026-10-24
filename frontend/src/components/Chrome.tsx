@@ -1,7 +1,8 @@
 import type { RefObject } from "react";
 import { AnimatePresence, motion } from "framer-motion";
 import type { Theme } from "../theme";
-import { springSnappy, springEmphasized } from "../motion";
+import { springSnappy, springEmphasized, springFollow } from "../motion";
+import { useDragSelect } from "./useDragSelect";
 import {
   IconCheck,
   IconClose,
@@ -22,6 +23,7 @@ const NAV_ITEMS: { id: SectionId; label: string; icon: typeof IconGrid }[] = [
   { id: "customers", label: "Клиенты", icon: IconUsers },
   { id: "model", label: "Модель риска", icon: IconSliders },
 ];
+const NAV_IDS = NAV_ITEMS.map((item) => item.id);
 
 /* ---------------- Theme toggle: sun <-> moon morph ---------------- */
 
@@ -46,7 +48,7 @@ export function ThemeToggle({
       whileTap={{ scale: 0.88, rotate: isDark ? -12 : 12 }}
       transition={springSnappy}
     >
-      <AnimatePresence mode="wait" initial={false}>
+      <AnimatePresence mode="popLayout" initial={false}>
         <motion.span
           key={theme}
           className="theme-icon-swap"
@@ -82,6 +84,13 @@ export function Sidebar({
   connectionError,
   onLogout,
 }: SidebarProps) {
+  const drag = useDragSelect<SectionId>({
+    values: NAV_IDS,
+    selected: activeSection,
+    axis: "y",
+    onCommit: (value) => onNavigate(value),
+  });
+
   return (
     <aside className="sidebar">
       <a href="#overview" className="brand-lockup" aria-label="Контур — к обзору">
@@ -108,26 +117,41 @@ export function Sidebar({
       </a>
 
       <div className="workspace-label">Рабочее пространство</div>
-      <nav className="workspace-nav" aria-label="Разделы рабочего пространства">
+      <nav
+        className="workspace-nav drag-select"
+        aria-label="Разделы рабочего пространства. Можно зажать и вести указатель."
+        ref={drag.containerRef}
+        data-dragging={drag.dragging || undefined}
+        {...drag.containerHandlers}
+      >
+        {drag.thumbRect && (
+          <motion.span
+            className="nav-pill drag-thumb"
+            aria-hidden="true"
+            initial={false}
+            animate={{
+              x: drag.thumbRect.x,
+              y: drag.thumbRect.y,
+              width: drag.thumbRect.w,
+              height: drag.thumbRect.h,
+              opacity: drag.active ? 1 : 0,
+            }}
+            transition={springFollow}
+          />
+        )}
         {NAV_ITEMS.map((item) => {
-          const active = activeSection === item.id;
+          const active = drag.active === item.id;
           const Icon = item.icon;
           return (
             <a
               key={item.id}
+              ref={drag.registerItem(item.id)}
               className={`nav-item${active ? " is-active" : ""}`}
               href={`#${item.id}`}
-              aria-current={active ? "location" : undefined}
-              onClick={() => onNavigate(item.id)}
+              draggable={false}
+              aria-current={activeSection === item.id ? "page" : undefined}
+              onClick={(event) => drag.handleItemClick(item.id, event)}
             >
-              {active && (
-                <motion.span
-                  className="nav-pill"
-                  layoutId="nav-active-pill"
-                  transition={springSnappy}
-                  aria-hidden="true"
-                />
-              )}
               <span className="nav-icon" aria-hidden="true">
                 <Icon />
               </span>
@@ -187,28 +211,51 @@ export function MobileNav({
   activeSection: SectionId;
   onNavigate: (section: SectionId) => void;
 }) {
+  const drag = useDragSelect<SectionId>({
+    values: NAV_IDS,
+    selected: activeSection,
+    axis: "x",
+    allowTouch: true,
+    onCommit: (value) => onNavigate(value),
+  });
+
   return (
-    <nav className="mobile-nav" aria-label="Основная навигация">
+    <nav
+      className="mobile-nav drag-select drag-select-touch-x"
+      aria-label="Основная навигация. Можно зажать и вести палец."
+      ref={drag.containerRef}
+      data-dragging={drag.dragging || undefined}
+      {...drag.containerHandlers}
+    >
+      {drag.thumbRect && (
+        <motion.span
+          className="mobile-nav-pill drag-thumb"
+          aria-hidden="true"
+          initial={false}
+          animate={{
+            x: drag.thumbRect.x,
+            y: drag.thumbRect.y,
+            width: drag.thumbRect.w,
+            height: drag.thumbRect.h,
+            opacity: drag.active ? 1 : 0,
+          }}
+          transition={springFollow}
+        />
+      )}
       {NAV_ITEMS.map((item) => {
-        const active = activeSection === item.id;
+        const active = drag.active === item.id;
         const Icon = item.icon;
         return (
           <a
             key={item.id}
+            ref={drag.registerItem(item.id)}
             href={`#${item.id}`}
+            draggable={false}
             className={`mobile-nav-item${active ? " is-active" : ""}`}
-            aria-current={active ? "location" : undefined}
-            onClick={() => onNavigate(item.id)}
+            aria-current={activeSection === item.id ? "page" : undefined}
+            onClick={(event) => drag.handleItemClick(item.id, event)}
           >
             <span className="mobile-nav-icon-wrap">
-              {active && (
-                <motion.span
-                  className="mobile-nav-pill"
-                  layoutId="mobile-nav-pill"
-                  transition={springSnappy}
-                  aria-hidden="true"
-                />
-              )}
               <Icon />
             </span>
             <span>{item.label}</span>
@@ -222,6 +269,7 @@ export function MobileNav({
 /* ---------------- Top app bar ---------------- */
 
 interface TopbarProps {
+  sectionLabel: string;
   theme: Theme;
   onToggleTheme: () => void;
   connectionError: boolean;
@@ -234,6 +282,7 @@ interface TopbarProps {
 }
 
 export function Topbar({
+  sectionLabel,
   theme,
   onToggleTheme,
   connectionError,
@@ -252,7 +301,17 @@ export function Topbar({
         <span className="crumb-separator" aria-hidden="true">
           /
         </span>
-        <strong>Аналитика</strong>
+        <AnimatePresence mode="popLayout" initial={false}>
+          <motion.strong
+            key={sectionLabel}
+            initial={{ opacity: 0, y: 6 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: -6 }}
+            transition={springSnappy}
+          >
+            {sectionLabel}
+          </motion.strong>
+        </AnimatePresence>
       </div>
       <div className="topbar-actions">
         <span

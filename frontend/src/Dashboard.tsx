@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { AnimatePresence, motion } from "framer-motion";
 import type {
+  Customer,
   CustomerList as CustomerListData,
   ModelSettings,
   RiskLevel,
@@ -8,15 +9,17 @@ import type {
   SortOrder,
   Summary,
 } from "./types";
+import { RISK_LABELS } from "./types";
 import { api, ApiError } from "./api";
-import { customerWord, integer, money as moneyFormat, timeLabel, todayLabel } from "./format";
+import { customerWord, integer, money as moneyFormat, money, timeLabel, todayLabel } from "./format";
 import { useTheme } from "./theme";
-import { fadeRise, springEmphasized, springSnappy } from "./motion";
+import { fadeRise, pageVariants, springEmphasized, springSnappy } from "./motion";
 import { CustomerList } from "./components/CustomerList";
 import { RiskDonut } from "./components/RiskDonut";
 import { ForecastChart } from "./components/ForecastChart";
 import { KpiCards, KpiSkeletons } from "./components/KpiCards";
 import { WeightControls } from "./components/WeightControls";
+import { AnimatedNumber } from "./components/AnimatedNumber";
 import {
   MobileNav,
   Sidebar,
@@ -26,11 +29,180 @@ import {
   type ToastState,
   type UploadPhase,
 } from "./components/Chrome";
-import { IconArrowUpRight, IconUpload } from "./icons";
+import { IconArrowRight, IconArrowUpRight, IconChevron, IconUpload } from "./icons";
 
 const PAGE_SIZE = 50;
+const PAGE_ORDER: SectionId[] = ["overview", "customers", "model"];
 
 type SaveStatus = "synced" | "saving" | "error";
+
+function pageFromHash(): SectionId {
+  const raw = window.location.hash.replace("#", "");
+  return (PAGE_ORDER as string[]).includes(raw) ? (raw as SectionId) : "overview";
+}
+
+/* ---------------- Overview: today's retention queue ---------------- */
+
+function TodayQueue({
+  items,
+  total,
+  loading,
+  onOpen,
+  onShowAll,
+}: {
+  items: Customer[];
+  total: number;
+  loading: boolean;
+  onOpen: (id: string) => void;
+  onShowAll: () => void;
+}) {
+  return (
+    <motion.section
+      className="panel queue-panel"
+      variants={fadeRise}
+      custom={0.16}
+      initial="hidden"
+      animate="show"
+      aria-label="Очередь на сегодня"
+    >
+      <div className="panel-heading queue-heading">
+        <div className="section-heading-copy">
+          <span className="eyebrow">Сначала — эти клиенты</span>
+          <h2>Очередь на сегодня</h2>
+          <p>Высокий риск по убыванию score. Клик откроет карточку на странице «Клиенты».</p>
+        </div>
+        <motion.button
+          type="button"
+          className="button button-tonal button-small"
+          onClick={onShowAll}
+          whileTap={{ scale: 0.96 }}
+          transition={springSnappy}
+        >
+          Все с высоким риском{total ? ` · ${integer(total)}` : ""} <IconArrowRight />
+        </motion.button>
+      </div>
+
+      {loading && items.length === 0 ? (
+        <div className="queue-skeletons" aria-hidden="true">
+          {[0, 1, 2].map((index) => (
+            <div key={index} className="row-skeleton">
+              <span className="skeleton skeleton-avatar" />
+              <span className="skeleton skeleton-line skeleton-line-wide" />
+              <span className="skeleton skeleton-pill" />
+            </div>
+          ))}
+        </div>
+      ) : items.length === 0 ? (
+        <div className="table-state queue-empty">
+          <strong>Клиентов с высоким риском сейчас нет</strong>
+          <span>Очередь пуста — можно заняться плановыми контактами среднего риска.</span>
+        </div>
+      ) : (
+        <div className="queue-list" role="list">
+          {items.map((customer, index) => (
+            <motion.button
+              key={customer.id}
+              type="button"
+              role="listitem"
+              className="queue-row"
+              onClick={() => onOpen(customer.id)}
+              initial={{ opacity: 0, y: 14 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ ...springEmphasized, delay: 0.05 * index }}
+              whileHover={{ y: -2 }}
+              whileTap={{ scale: 0.99 }}
+              aria-label={`Открыть клиента ${customer.email} на странице клиентов`}
+            >
+              <span className="queue-rank" aria-hidden="true">
+                {index + 1}
+              </span>
+              <span className="client-avatar client-avatar-high" aria-hidden="true">
+                {(customer.email?.trim()?.[0] || "?").toUpperCase()}
+              </span>
+              <span className="queue-copy">
+                <span className="client-email" title={customer.email}>
+                  {customer.email}
+                </span>
+                <span className="queue-reason">
+                  {customer.reasons?.[0] || "Высокий риск по совокупности сигналов"}
+                </span>
+              </span>
+              <span className="queue-side">
+                <strong>{money(customer.estimatedLoss)}</strong>
+                <span>под риском · 90 дней</span>
+              </span>
+              <span className="risk-pill risk-pill-high">
+                {`${RISK_LABELS.high} · ${customer.score ?? "—"}`}
+              </span>
+              <span className="queue-chevron" aria-hidden="true">
+                <IconChevron />
+              </span>
+            </motion.button>
+          ))}
+        </div>
+      )}
+    </motion.section>
+  );
+}
+
+/* ---------------- Model page: live effect strip ---------------- */
+
+function ModelImpact({ summary }: { summary: Summary }) {
+  const segments: { key: RiskLevel; value: number }[] = [
+    { key: "high", value: summary.highRisk },
+    { key: "medium", value: summary.mediumRisk },
+    { key: "low", value: summary.lowRisk },
+    { key: "unrated", value: summary.unratedCount },
+  ];
+  return (
+    <motion.section
+      className="panel impact-panel"
+      variants={fadeRise}
+      custom={0.06}
+      initial="hidden"
+      animate="show"
+      aria-label="Текущий эффект модели"
+    >
+      <div className="impact-head">
+        <div>
+          <span className="eyebrow">Эффект сейчас</span>
+          <h2>Распределение после пересчёта</h2>
+        </div>
+        <div className="impact-loss">
+          <span>Выручка под риском</span>
+          <AnimatedNumber value={summary.estimatedLoss} format={moneyFormat} />
+        </div>
+      </div>
+      <div className="impact-bar" aria-hidden="true">
+        {segments.map((segment) => (
+          <motion.span
+            key={segment.key}
+            className={`impact-seg impact-seg-${segment.key}`}
+            initial={false}
+            animate={{ flexGrow: Math.max(segment.value, 0.0001) }}
+            transition={springEmphasized}
+          />
+        ))}
+      </div>
+      <div className="impact-stats">
+        {segments.map((segment) => (
+          <div key={segment.key} className="impact-stat">
+            <span>
+              <span className={`risk-dot risk-dot-${segment.key}`} aria-hidden="true" />{" "}
+              {RISK_LABELS[segment.key]}
+            </span>
+            <AnimatedNumber value={segment.value} format={integer} />
+          </div>
+        ))}
+      </div>
+      <p className="panel-hint">
+        Двигайте весы ниже — распределение и выручка пересчитаются прямо на этой странице.
+      </p>
+    </motion.section>
+  );
+}
+
+/* ---------------- Dashboard shell + pages ---------------- */
 
 export function Dashboard() {
   const { theme, toggleTheme } = useTheme();
@@ -38,6 +210,7 @@ export function Dashboard() {
   const [username, setUsername] = useState("Аналитик");
   const [summary, setSummary] = useState<Summary | null>(null);
   const [customers, setCustomers] = useState<CustomerListData>({ items: [], total: 0 });
+  const [topQueue, setTopQueue] = useState<CustomerListData>({ items: [], total: 0 });
   const [settings, setSettings] = useState<ModelSettings | null>(null);
   const [sort, setSort] = useState<SortKey>("score");
   const [order, setOrder] = useState<SortOrder>("desc");
@@ -45,7 +218,8 @@ export function Dashboard() {
   const [offset, setOffset] = useState(0);
   const [direction, setDirection] = useState(1);
   const [expandedId, setExpandedId] = useState<string | null>(null);
-  const [activeSection, setActiveSection] = useState<SectionId>("overview");
+  const [page, setPage] = useState<SectionId>(() => pageFromHash());
+  const [pageDirection, setPageDirection] = useState(1);
   const [connectionError, setConnectionError] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [initialLoading, setInitialLoading] = useState(true);
@@ -57,6 +231,10 @@ export function Dashboard() {
   const [liveMessage, setLiveMessage] = useState("");
 
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const pageHeadingRef = useRef<HTMLHeadingElement>(null);
+  const pageRef = useRef(page);
+  pageRef.current = page;
+  const firstPageRender = useRef(true);
   const refreshPromise = useRef<Promise<void> | null>(null);
   const pendingWeights = useRef<Record<string, number>>({});
   const saveTimer = useRef<number | null>(null);
@@ -71,6 +249,58 @@ export function Dashboard() {
     if (toastTimer.current) window.clearTimeout(toastTimer.current);
     if (!persistent) {
       toastTimer.current = window.setTimeout(() => setToast(null), 4200);
+    }
+  }, []);
+
+  /* ---------------- page routing (one nav item = one page) ---------------- */
+
+  const goToPage = useCallback((next: SectionId) => {
+    if (next === pageRef.current) return;
+    setPageDirection(
+      PAGE_ORDER.indexOf(next) >= PAGE_ORDER.indexOf(pageRef.current) ? 1 : -1,
+    );
+    setPage(next);
+    if (window.location.hash !== `#${next}`) {
+      window.history.pushState(null, "", `#${next}`);
+    }
+  }, []);
+
+  // Back/forward buttons and manual hash edits.
+  useEffect(() => {
+    const onHash = () => {
+      const next = pageFromHash();
+      if (next !== pageRef.current) {
+        setPageDirection(
+          PAGE_ORDER.indexOf(next) >= PAGE_ORDER.indexOf(pageRef.current) ? 1 : -1,
+        );
+        setPage(next);
+      }
+    };
+    window.addEventListener("hashchange", onHash);
+    window.addEventListener("popstate", onHash);
+    return () => {
+      window.removeEventListener("hashchange", onHash);
+      window.removeEventListener("popstate", onHash);
+    };
+  }, []);
+
+  // Page turns start from the top; focus moves to the new heading when it
+  // actually mounts (AnimatePresence mode="wait" mounts it after the exit).
+  const focusPendingRef = useRef(false);
+  useEffect(() => {
+    if (firstPageRender.current) {
+      firstPageRender.current = false;
+      return;
+    }
+    window.scrollTo({ top: 0, left: 0, behavior: "auto" });
+    focusPendingRef.current = true;
+  }, [page]);
+
+  const setHeadingRef = useCallback((el: HTMLHeadingElement | null) => {
+    pageHeadingRef.current = el;
+    if (el && focusPendingRef.current) {
+      focusPendingRef.current = false;
+      el.focus({ preventScroll: true });
     }
   }, []);
 
@@ -100,12 +330,25 @@ export function Dashboard() {
           offset: String(effective.offset),
         });
         if (effective.risk) params.set("risk", effective.risk);
-        const requests: [Promise<Summary>, Promise<CustomerListData>, Promise<ModelSettings | null>] = [
+        const queueParams = new URLSearchParams({
+          risk: "high",
+          sort: "score",
+          order: "desc",
+          limit: "5",
+          offset: "0",
+        });
+        const requests: [
+          Promise<Summary>,
+          Promise<CustomerListData>,
+          Promise<CustomerListData>,
+          Promise<ModelSettings | null>,
+        ] = [
           api<Summary>("/api/v1/analytics/summary"),
           api<CustomerListData>(`/api/v1/customers?${params}`),
+          api<CustomerListData>(`/api/v1/customers?${queueParams}`),
           includeSettings ? api<ModelSettings>("/api/v1/model/settings") : Promise.resolve(null),
         ];
-        const [summaryData, firstPage, freshSettings] = await Promise.all(requests);
+        const [summaryData, firstPage, queueData, freshSettings] = await Promise.all(requests);
         let customerData = firstPage;
         let nextOffset = effective.offset;
         if (effective.offset > 0 && effective.offset >= customerData.total) {
@@ -118,7 +361,7 @@ export function Dashboard() {
         }
 
         // Avoid pointless re-renders (and re-animations) on identical polls.
-        const signature = JSON.stringify([summaryData, customerData, freshSettings]);
+        const signature = JSON.stringify([summaryData, customerData, queueData, freshSettings]);
         if (signature !== signatureRef.current) {
           signatureRef.current = signature;
           const previous = summaryRef.current;
@@ -135,6 +378,7 @@ export function Dashboard() {
           summaryRef.current = summaryData;
           setSummary(summaryData);
           setCustomers(customerData);
+          setTopQueue(queueData);
           if (freshSettings) setSettings(freshSettings);
         }
         setLastUpdated(`Обновлено ${timeLabel()}`);
@@ -201,29 +445,6 @@ export function Dashboard() {
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
-
-  /* ---------------- scroll-spy ---------------- */
-
-  useEffect(() => {
-    if (!("IntersectionObserver" in window)) return;
-    const observer = new IntersectionObserver(
-      (entries) => {
-        const nearest = entries
-          .filter((entry) => entry.isIntersecting)
-          .sort(
-            (a, b) =>
-              Math.abs(a.boundingClientRect.top - 110) -
-              Math.abs(b.boundingClientRect.top - 110),
-          )[0];
-        if (nearest) setActiveSection(nearest.target.id as SectionId);
-      },
-      { rootMargin: "-12% 0px -35% 0px", threshold: [0, 0.1, 0.35] },
-    );
-    document
-      .querySelectorAll("[data-observe-section]")
-      .forEach((section) => observer.observe(section));
-    return () => observer.disconnect();
-  }, [summary, settings]);
 
   /* ---------------- weights ---------------- */
 
@@ -334,9 +555,34 @@ export function Dashboard() {
 
   const showHighRisk = useCallback(() => {
     handleRiskChange("high");
-    setActiveSection("customers");
-    document.getElementById("customers")?.scrollIntoView({ behavior: "smooth", block: "start" });
-  }, [handleRiskChange]);
+    goToPage("customers");
+  }, [handleRiskChange, goToPage]);
+
+  // Donut on the overview navigates into the filtered work queue.
+  const handleOverviewRiskSelect = useCallback(
+    (next: RiskLevel | "") => {
+      handleRiskChange(next);
+      if (next) goToPage("customers");
+    },
+    [handleRiskChange, goToPage],
+  );
+
+  const openFromQueue = useCallback(
+    (id: string) => {
+      setSort("score");
+      setOrder("desc");
+      setRisk("high");
+      setOffset(0);
+      setDirection(1);
+      setExpandedId(id);
+      goToPage("customers");
+      reloadWith(
+        { sort: "score", order: "desc", risk: "high", offset: 0 },
+        "Не удалось открыть клиента",
+      );
+    },
+    [goToPage, reloadWith],
+  );
 
   /* ---------------- snapshot upload (+ drag & drop) ---------------- */
 
@@ -430,6 +676,249 @@ export function Dashboard() {
     }
   }, [showToast]);
 
+  /* ---------------- pages ---------------- */
+
+  const pageFooter = (
+    <footer className="page-footer">
+      <span>Контур · Аналитика удержания</span>
+      <span>Источник: евроценты · Панель: евро</span>
+    </footer>
+  );
+
+  const overviewPage = (
+    <>
+      <section className="page-heading">
+        <div className="page-heading-copy">
+          <span className="eyebrow">
+            <span className="eyebrow-line" aria-hidden="true" />
+            Центр удержания
+          </span>
+          <h1 ref={setHeadingRef} tabIndex={-1}>
+            Риск оттока<span className="heading-period">.</span>
+          </h1>
+          <p>
+            Приоритеты команды, причины риска и выручка под угрозой — в одном
+            рабочем пространстве, которое пересчитывается на лету.
+          </p>
+        </div>
+        <div className="heading-side">
+          <span className="date-label">{todayLabel()}</span>
+          <a href="/api/v1/docs" target="_blank" rel="noreferrer" className="docs-link">
+            API и документация <IconArrowUpRight />
+          </a>
+        </div>
+      </section>
+
+      {summary ? (
+        <KpiCards summary={summary} onShowHighRisk={showHighRisk} />
+      ) : (
+        <KpiSkeletons />
+      )}
+
+      <section className="overview-analytics" aria-label="Сводная аналитика">
+        <motion.article
+          className="panel risk-panel"
+          variants={fadeRise}
+          custom={0.1}
+          initial="hidden"
+          animate="show"
+        >
+          <div className="panel-heading">
+            <div>
+              <span className="eyebrow">Сегменты</span>
+              <h2>Уровень риска</h2>
+            </div>
+            <span className="panel-meta">Сейчас</span>
+          </div>
+          {summary ? (
+            <RiskDonut summary={summary} activeRisk={risk} onSelectRisk={handleOverviewRiskSelect} />
+          ) : (
+            <div className="donut-skeleton skeleton" aria-hidden="true" />
+          )}
+          <p className="panel-hint">
+            Зажмите и ведите по легенде, отпустите на сегменте — откроется отфильтрованная
+            очередь клиентов.
+          </p>
+        </motion.article>
+
+        <motion.article
+          className="panel chart-panel"
+          variants={fadeRise}
+          custom={0.16}
+          initial="hidden"
+          animate="show"
+        >
+          <div className="panel-heading">
+            <div>
+              <span className="eyebrow">По срокам услуг</span>
+              <h2>Продления на горизонте 30 дней</h2>
+            </div>
+            <span className="panel-meta">Календарный ориентир</span>
+          </div>
+          <div className="chart-legend" aria-hidden="true">
+            <span>
+              <i className="fact-swatch" />
+              Сейчас
+            </span>
+            <span>
+              <i className="forecast-swatch" />
+              К сроку
+            </span>
+          </div>
+          <ForecastChart forecast={summary?.churnForecast} />
+          <p id="forecastDescription" className="chart-note">
+            Число услуг, ожидающих оплаты сейчас и приближающихся к окончанию. Это
+            календарный ориентир, не вероятность оттока.
+          </p>
+        </motion.article>
+      </section>
+
+      <TodayQueue
+        items={topQueue.items}
+        total={topQueue.total}
+        loading={initialLoading}
+        onOpen={openFromQueue}
+        onShowAll={showHighRisk}
+      />
+      {pageFooter}
+    </>
+  );
+
+  const customersPage = (
+    <>
+      <section className="page-heading page-heading-compact">
+        <div className="page-heading-copy">
+          <span className="eyebrow">
+            <span className="eyebrow-line" aria-hidden="true" />
+            Рабочее пространство
+          </span>
+          <h1 ref={setHeadingRef} tabIndex={-1}>
+            Клиенты<span className="heading-period">.</span>
+          </h1>
+          <p>Очередь удержания по текущему снимку: сортируйте, фильтруйте и открывайте карточки прямо в списке.</p>
+        </div>
+        <div className="heading-side">
+          <span className="date-label">{todayLabel()}</span>
+          <span className="panel-meta">
+            {integer(customers.total)} {customerWord(customers.total)} в выборке
+          </span>
+        </div>
+      </section>
+
+      <motion.section
+        className="panel table-panel"
+        variants={fadeRise}
+        custom={0.06}
+        initial="hidden"
+        animate="show"
+        aria-label="Список клиентов"
+      >
+        <CustomerList
+          items={customers.items}
+          total={customers.total}
+          sort={sort}
+          order={order}
+          onSort={handleSort}
+          risk={risk}
+          onRiskChange={handleRiskChange}
+          offset={offset}
+          pageSize={PAGE_SIZE}
+          direction={direction}
+          onPrevious={handlePrevious}
+          onNext={handleNext}
+          expandedId={expandedId}
+          onToggle={(id) => setExpandedId((current) => (current === id ? null : id))}
+          onToast={showToast}
+          initialLoading={initialLoading}
+          loadError={loadError}
+          onRetry={() =>
+            refresh(true).catch((error) =>
+              handleRefreshError(error, "Не удалось загрузить данные"),
+            )
+          }
+        />
+        <p className="table-footnote">
+          Оценка по текущему снимку · горизонт потерь — три месяца ·{" "}
+          {integer(customers.total)} {customerWord(customers.total)} в выборке
+        </p>
+      </motion.section>
+      {pageFooter}
+    </>
+  );
+
+  const modelPage = (
+    <>
+      <section className="page-heading page-heading-compact">
+        <div className="page-heading-copy">
+          <span className="eyebrow">
+            <span className="eyebrow-line" aria-hidden="true" />
+            Настройка приоритетов
+          </span>
+          <h1 ref={setHeadingRef} tabIndex={-1}>
+            Модель риска<span className="heading-period">.</span>
+          </h1>
+          <p>Веса сигналов объяснимой эвристики. Изменения сохраняются автоматически и сразу пересчитывают все страницы.</p>
+        </div>
+        <div className="heading-side">
+          <span className="date-label">{todayLabel()}</span>
+          <span className={`saved-status saved-${saveStatus}`} role="status" aria-live="polite">
+            <motion.i
+              aria-hidden="true"
+              animate={
+                saveStatus === "saving"
+                  ? { scale: [1, 1.5, 1], opacity: [1, 0.5, 1] }
+                  : { scale: 1, opacity: 1 }
+              }
+              transition={saveStatus === "saving" ? { repeat: Infinity, duration: 0.9 } : springSnappy}
+            />
+            <span>
+              {saveStatus === "saving"
+                ? "Сохраняем…"
+                : saveStatus === "error"
+                  ? "Не сохранено"
+                  : "Синхронизировано"}
+            </span>
+          </span>
+        </div>
+      </section>
+
+      {summary ? <ModelImpact summary={summary} /> : <KpiSkeletons />}
+
+      <motion.section
+        className="panel model-panel"
+        variants={fadeRise}
+        custom={0.12}
+        initial="hidden"
+        animate="show"
+        aria-label="Веса сигналов"
+      >
+        <div className="panel-heading model-heading">
+          <div className="section-heading-copy">
+            <span className="eyebrow">Сигналы и веса</span>
+            <h2>Как рассчитывается риск</h2>
+            <p>
+              Измените вклад сигнала — оценки, порядок клиентов и выручка под риском
+              пересчитаются и сохранятся автоматически.
+            </p>
+          </div>
+        </div>
+        {settings ? (
+          <WeightControls settings={settings} onWeightChange={handleWeightChange} />
+        ) : (
+          <div className="weight-skeletons" aria-hidden="true">
+            {[0, 1, 2, 3, 4, 5].map((index) => (
+              <div key={index} className="weight-item">
+                <span className="skeleton skeleton-line skeleton-line-narrow" />
+                <span className="skeleton skeleton-line" />
+              </div>
+            ))}
+          </div>
+        )}
+      </motion.section>
+      {pageFooter}
+    </>
+  );
+
   /* ---------------- render ---------------- */
 
   return (
@@ -438,8 +927,8 @@ export function Dashboard() {
         Перейти к содержимому
       </a>
       <Sidebar
-        activeSection={activeSection}
-        onNavigate={setActiveSection}
+        activeSection={page}
+        onNavigate={goToPage}
         customerCount={summary ? integer(summary.customerCount) : "—"}
         username={username}
         connectionError={connectionError}
@@ -448,6 +937,9 @@ export function Dashboard() {
 
       <main className="main-content" id="mainContent" tabIndex={-1}>
         <Topbar
+          sectionLabel={
+            { overview: "Обзор", customers: "Клиенты", model: "Модель риска" }[page]
+          }
           theme={theme}
           onToggleTheme={toggleTheme}
           connectionError={connectionError}
@@ -459,209 +951,22 @@ export function Dashboard() {
           onLogout={() => void logout()}
         />
 
-        <motion.section
-          className="page-heading"
-          id="overview"
-          data-observe-section
-          variants={fadeRise}
-          custom={0}
-          initial="hidden"
-          animate="show"
-        >
-          <div className="page-heading-copy">
-            <span className="eyebrow">
-              <span className="eyebrow-line" aria-hidden="true" />
-              Центр удержания
-            </span>
-            <h1>
-              Риск оттока<span className="heading-period">.</span>
-            </h1>
-            <p>
-              Приоритеты команды, причины риска и выручка под угрозой — в одном
-              рабочем пространстве, которое пересчитывается на лету.
-            </p>
-          </div>
-          <div className="heading-side">
-            <span className="date-label">{todayLabel()}</span>
-            <a href="/api/v1/docs" target="_blank" rel="noreferrer" className="docs-link">
-              API и документация <IconArrowUpRight />
-            </a>
-          </div>
-        </motion.section>
-
-        {summary ? (
-          <KpiCards summary={summary} onShowHighRisk={showHighRisk} />
-        ) : (
-          <KpiSkeletons />
-        )}
-
-        <section className="dashboard-body" aria-label="Рейтинг клиентов и аналитика">
-          <motion.section
-            className="panel table-panel"
-            id="customers"
-            data-observe-section
-            variants={fadeRise}
-            custom={0.08}
-            initial="hidden"
-            whileInView="show"
-            viewport={{ once: true, margin: "-40px" }}
+        <AnimatePresence mode="wait" custom={pageDirection} initial={false}>
+          <motion.div
+            key={page}
+            className="page-view"
+            custom={pageDirection}
+            variants={pageVariants}
+            initial="enter"
+            animate="center"
+            exit="exit"
           >
-            <CustomerList
-              items={customers.items}
-              total={customers.total}
-              sort={sort}
-              order={order}
-              onSort={handleSort}
-              risk={risk}
-              onRiskChange={handleRiskChange}
-              offset={offset}
-              pageSize={PAGE_SIZE}
-              direction={direction}
-              onPrevious={handlePrevious}
-              onNext={handleNext}
-              expandedId={expandedId}
-              onToggle={(id) => setExpandedId((current) => (current === id ? null : id))}
-              onToast={showToast}
-              initialLoading={initialLoading}
-              loadError={loadError}
-              onRetry={() =>
-                refresh(true).catch((error) =>
-                  handleRefreshError(error, "Не удалось загрузить данные"),
-                )
-              }
-            />
-            <p className="table-footnote">
-              Оценка по текущему снимку · горизонт потерь — три месяца ·{" "}
-              {integer(customers.total)} {customerWord(customers.total)} в выборке
-            </p>
-          </motion.section>
-
-          <aside className="analytics-rail" aria-label="Сводная аналитика">
-            <motion.article
-              className="panel risk-panel"
-              variants={fadeRise}
-              custom={0.14}
-              initial="hidden"
-              whileInView="show"
-              viewport={{ once: true, margin: "-40px" }}
-            >
-              <div className="panel-heading">
-                <div>
-                  <span className="eyebrow">Сегменты</span>
-                  <h2>Уровень риска</h2>
-                </div>
-                <span className="panel-meta">Сейчас</span>
-              </div>
-              {summary ? (
-                <RiskDonut summary={summary} activeRisk={risk} onSelectRisk={handleRiskChange} />
-              ) : (
-                <div className="donut-skeleton skeleton" aria-hidden="true" />
-              )}
-              <p className="panel-hint">
-                Нажмите сегмент в легенде — список клиентов слева отфильтруется.
-              </p>
-            </motion.article>
-
-            <motion.article
-              className="panel chart-panel"
-              variants={fadeRise}
-              custom={0.2}
-              initial="hidden"
-              whileInView="show"
-              viewport={{ once: true, margin: "-40px" }}
-            >
-              <div className="panel-heading">
-                <div>
-                  <span className="eyebrow">По срокам услуг</span>
-                  <h2>Продления на горизонте 30 дней</h2>
-                </div>
-              </div>
-              <div className="chart-legend" aria-hidden="true">
-                <span>
-                  <i className="fact-swatch" />
-                  Сейчас
-                </span>
-                <span>
-                  <i className="forecast-swatch" />
-                  К сроку
-                </span>
-              </div>
-              <ForecastChart forecast={summary?.churnForecast} />
-              <p id="forecastDescription" className="chart-note">
-                Число услуг, ожидающих оплаты сейчас и приближающихся к окончанию. Это
-                календарный ориентир, не вероятность оттока.
-              </p>
-            </motion.article>
-          </aside>
-        </section>
-
-        <motion.section
-          className="panel model-panel"
-          id="model"
-          data-observe-section
-          variants={fadeRise}
-          custom={0.05}
-          initial="hidden"
-          whileInView="show"
-          viewport={{ once: true, margin: "-40px" }}
-        >
-          <div className="panel-heading model-heading">
-            <div className="section-heading-copy">
-              <span className="eyebrow">Настройка приоритетов</span>
-              <h2>Как рассчитывается риск</h2>
-              <p>
-                Измените вклад сигнала — оценки, порядок клиентов и выручка под риском
-                пересчитаются и сохранятся автоматически.
-              </p>
-            </div>
-            <span
-              className={`saved-status saved-${saveStatus}`}
-              role="status"
-              aria-live="polite"
-            >
-              <motion.i
-                aria-hidden="true"
-                animate={
-                  saveStatus === "saving"
-                    ? { scale: [1, 1.5, 1], opacity: [1, 0.5, 1] }
-                    : { scale: 1, opacity: 1 }
-                }
-                transition={
-                  saveStatus === "saving"
-                    ? { repeat: Infinity, duration: 0.9 }
-                    : springSnappy
-                }
-              />
-              <span>
-                {saveStatus === "saving"
-                  ? "Сохраняем…"
-                  : saveStatus === "error"
-                    ? "Не сохранено"
-                    : "Синхронизировано"}
-              </span>
-            </span>
-          </div>
-          {settings ? (
-            <WeightControls settings={settings} onWeightChange={handleWeightChange} />
-          ) : (
-            <div className="weight-skeletons" aria-hidden="true">
-              {[0, 1, 2, 3, 4, 5].map((index) => (
-                <div key={index} className="weight-item">
-                  <span className="skeleton skeleton-line skeleton-line-narrow" />
-                  <span className="skeleton skeleton-line" />
-                </div>
-              ))}
-            </div>
-          )}
-        </motion.section>
-
-        <footer className="page-footer">
-          <span>Контур · Аналитика удержания</span>
-          <span>Источник: евроценты · Панель: евро</span>
-        </footer>
+            {page === "overview" ? overviewPage : page === "customers" ? customersPage : modelPage}
+          </motion.div>
+        </AnimatePresence>
       </main>
 
-      <MobileNav activeSection={activeSection} onNavigate={setActiveSection} />
+      <MobileNav activeSection={page} onNavigate={goToPage} />
       <Snackbar toast={toast} onClose={() => setToast(null)} />
 
       <AnimatePresence>

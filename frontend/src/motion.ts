@@ -35,6 +35,14 @@ export const springGentle: Transition = {
   mass: 1,
 };
 
+/** Drag-select thumbs: tight spring that chases the pointer without lag. */
+export const springFollow: Transition = {
+  type: "spring",
+  stiffness: 520,
+  damping: 38,
+  mass: 0.9,
+};
+
 /** M3 emphasized easing as a tween fallback (path morphs, counters). */
 export const emphasizedTween: Transition = {
   type: "tween",
@@ -94,3 +102,19 @@ export const pressable = {
   whileTap: { scale: 0.97 },
   transition: springSnappy,
 } as const;
+
+/** Direction-aware full-page turns (Обзор ⇄ Клиенты ⇄ Модель). */
+export const pageVariants: Variants = {
+  enter: (direction: number) => ({
+    opacity: 0,
+    x: direction >= 0 ? 38 : -38,
+    scale: 0.995,
+  }),
+  center: { opacity: 1, x: 0, scale: 1, transition: springEmphasized },
+  exit: (direction: number) => ({
+    opacity: 0,
+    x: direction >= 0 ? -26 : 26,
+    scale: 0.995,
+    transition: { duration: 0.18, ease: [0.3, 0, 1, 1] },
+  }),
+};
