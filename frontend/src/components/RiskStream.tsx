@@ -1,4 +1,4 @@
-import { useId, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 import { motion } from "framer-motion";
 import type { Customer, Summary } from "../types";
 import { integer, money } from "../format";
@@ -42,8 +42,14 @@ function smoothPath(p: Pt[], move = true): string {
     const p1 = p[i];
     const p2 = p[i + 1];
     const p3 = p[i + 2] ?? p2;
-    const k = 0.18;
-    d += ` C ${(p1[0] + (p2[0] - p0[0]) * k).toFixed(1)} ${(p1[1] + (p2[1] - p0[1]) * k).toFixed(1)}, ${(p2[0] - (p3[0] - p1[0]) * k).toFixed(1)} ${(p2[1] - (p3[1] - p1[1]) * k).toFixed(1)}, ${p2[0].toFixed(1)} ${p2[1].toFixed(1)}`;
+    const k = 0.16;
+    // Clamp control points to the segment's own y-range so a band can
+    // never bulge past its neighbours (the un-clamped spline drew
+    // "shoulders" higher than the data and pinched thin bands shut).
+    const lo = Math.min(p1[1], p2[1]);
+    const hi = Math.max(p1[1], p2[1]);
+    const clampY = (v: number) => Math.min(hi, Math.max(lo, v));
+    d += ` C ${(p1[0] + (p2[0] - p0[0]) * k).toFixed(1)} ${clampY(p1[1] + (p2[1] - p0[1]) * k).toFixed(1)}, ${(p2[0] - (p3[0] - p1[0]) * k).toFixed(1)} ${clampY(p2[1] - (p3[1] - p1[1]) * k).toFixed(1)}, ${p2[0].toFixed(1)} ${p2[1].toFixed(1)}`;
   }
   return d;
 }
@@ -62,7 +68,6 @@ export function RiskStream({
   summary: Summary;
   customers: Customer[];
 }) {
-  const uid = useId().replace(/:/g, "");
   const [hover, setHover] = useState<number | null>(null);
 
   const { matrix, totals, noDate, hasData, maxIdx } = useMemo(() => {
@@ -101,10 +106,18 @@ export function RiskStream({
       LEVELS.slice(0, li + 1).reduce((sum, l) => sum + row[l.key] * k, 0),
     ),
   );
-  const band = (c: number[]) =>
-    smoothPath(c.map((v, i) => [x(i), MID - v] as const)) +
-    smoothPath(c.map((v, i) => [x(i), MID + v] as const).reverse(), false) +
-    " Z";
+  // Virtual zero points just inside both edges: the stream flows in
+  // from a tip and out to a tip, symmetric and intentional at both
+  // ends, instead of starting mid-air wherever bucket 0 happens to be.
+  const xs = [10, ...BUCKETS.map((_, i) => x(i)), W - 10];
+  const band = (c: number[]) => {
+    const v = [0, ...c, 0];
+    return (
+      smoothPath(v.map((vv, i) => [xs[i], MID - vv] as const)) +
+      smoothPath(v.map((vv, i) => [xs[i], MID + vv] as const).reverse(), false) +
+      " Z"
+    );
+  };
   const flat = band(matrix.map(() => 0));
 
   return (
@@ -132,7 +145,7 @@ export function RiskStream({
       </div>
 
       <div className="riskstream-total">
-        <DotNumber value={summary.estimatedLoss} />
+        <DotNumber value={summary.estimatedLoss} pitch={6} />
         <div>
           <span className="riskstream-caption">выручка под риском · 90 дней</span>
           <span className="riskstream-sub">
@@ -151,17 +164,7 @@ export function RiskStream({
             aria-label={`Поток выручки под риском: пик на участке «${BUCKETS[maxIdx].label}» — ${money(totals[maxIdx])}.`}
             onPointerLeave={() => setHover(null)}
           >
-            <defs>
-              <linearGradient id={`${uid}-fade`} x1="0" x2="1">
-                <stop offset="0" stopColor="#fff" stopOpacity="0" />
-                <stop offset="0.14" stopColor="#fff" stopOpacity="1" />
-                <stop offset="1" stopColor="#fff" stopOpacity="1" />
-              </linearGradient>
-              <mask id={`${uid}-mask`}>
-                <rect width={W} height={H} fill={`url(#${uid}-fade)`} />
-              </mask>
-            </defs>
-            <g mask={`url(#${uid}-mask)`}>
+            <g>
               {[2, 1, 0].map((li) => (
                 <motion.path
                   key={LEVELS[li].key}
@@ -174,15 +177,20 @@ export function RiskStream({
               ))}
             </g>
             {hover !== null && (
-              <line
-                x1={x(active)}
-                x2={x(active)}
-                y1={14}
-                y2={H - 14}
-                stroke="#ffffff"
-                strokeOpacity="0.65"
-                strokeWidth="1.5"
-              />
+              <g pointerEvents="none">
+                <line
+                  x1={x(active)}
+                  x2={x(active)}
+                  y1={MID - totals[active] * k - 10}
+                  y2={MID + totals[active] * k + 10}
+                  stroke="#ffffff"
+                  strokeOpacity="0.75"
+                  strokeWidth="1.5"
+                  strokeLinecap="round"
+                />
+                <circle cx={x(active)} cy={MID - totals[active] * k} r="3.5" fill="#ffffff" />
+                <circle cx={x(active)} cy={MID + totals[active] * k} r="3.5" fill="#ffffff" />
+              </g>
             )}
             {BUCKETS.map((bucket, i) => {
               const left = i === 0 ? 0 : (x(i - 1) + x(i)) / 2;
@@ -218,6 +226,7 @@ export function RiskStream({
             {BUCKETS.map((bucket, i) => (
               <span
                 key={bucket.id}
+                className={i === active ? "is-active" : undefined}
                 style={{
                   left: `${(x(i) / W) * 100}%`,
                   transform:

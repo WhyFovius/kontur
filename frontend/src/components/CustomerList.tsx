@@ -905,12 +905,8 @@ export function CustomerList(props: CustomerListProps) {
           <motion.div
             className="empty-mascot-stage"
             initial={{ y: 14, opacity: 0, scale: 0.96 }}
-            animate={{ y: [0, -5, 0], opacity: 1, scale: 1 }}
-            transition={{
-              opacity: { duration: 0.25 },
-              scale: { duration: 0.35 },
-              y: { duration: 4.2, repeat: Infinity, ease: "easeInOut" },
-            }}
+            animate={{ y: 0, opacity: 1, scale: 1 }}
+            transition={springEmphasized}
             aria-hidden="true"
           >
             <BrandPattern />

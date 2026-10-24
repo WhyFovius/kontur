@@ -14,7 +14,7 @@ const GLYPHS: Record<string, string[]> = {
   "7": ["11111", "00001", "00010", "00100", "01000", "01000", "01000"],
   "8": ["01110", "10001", "10001", "01110", "10001", "10001", "01110"],
   "9": ["01110", "10001", "10001", "01111", "00001", "00010", "01100"],
-  "€": ["00111", "01000", "11110", "01000", "11110", "01000", "00111"],
+  "€": ["01110", "10001", "11111", "10000", "11111", "10001", "01110"],
   K: ["10001", "10010", "10100", "11000", "10100", "10010", "10001"],
   ".": ["00000", "00000", "00000", "00000", "00000", "01100", "01100"],
   ",": ["00000", "00000", "00000", "00000", "01100", "00100", "01000"],
@@ -39,7 +39,9 @@ function formatEuro(cents: number): string {
 export function DotNumber({ value, pitch = 5 }: { value: number; pitch?: number }) {
   const reduced = useReducedMotion();
   const mv = useMotionValue(reduced ? value : 0);
-  const spring = useSpring(mv, { stiffness: 55, damping: 20 });
+  // Critically damped, settles in ~0.6s: the old 55/20 spring crawled
+  // for two seconds and the matrix sat mid-morph in screenshots.
+  const spring = useSpring(mv, { stiffness: 170, damping: 26 });
   const [text, setText] = useState(() => formatEuro(reduced ? value : 0));
 
   useEffect(() => {
@@ -56,19 +58,25 @@ export function DotNumber({ value, pitch = 5 }: { value: number; pitch?: number 
   );
 
   const { circles, width } = useMemo(() => {
-    const on = new Set<string>();
-    let x = 0;
-    for (const ch of text) {
-      const glyph = GLYPHS[ch] ?? GLYPHS[" "];
-      const w = glyph[0].length;
-      for (let r = 0; r < 7; r++) {
-        for (let k = 0; k < w; k++) {
-          if (glyph[r][k] === "1") on.add(`${x + k}:${r}`);
+    const layout = (str: string) => {
+      const on = new Set<string>();
+      let x = 0;
+      for (const ch of str) {
+        const glyph = GLYPHS[ch] ?? GLYPHS[" "];
+        const w = glyph[0].length;
+        for (let r = 0; r < 7; r++) {
+          for (let k = 0; k < w; k++) {
+            if (glyph[r][k] === "1") on.add(`${x + k}:${r}`);
+          }
         }
+        x += w + 1;
       }
-      x += w + 1;
-    }
-    const usedCols = Math.max(1, x - 1);
+      return { on, cols: Math.max(1, x - 1) };
+    };
+    const { on, cols } = layout(text);
+    // Reserve the final value's width from the first frame so the count
+    // never makes the panel jump sideways as digits are added.
+    const usedCols = Math.max(cols, layout(formatEuro(value)).cols);
     const nodes: React.ReactNode[] = [];
     for (let c = 0; c < usedCols; c++) {
       for (let r = 0; r < 7; r++) {
@@ -93,7 +101,7 @@ export function DotNumber({ value, pitch = 5 }: { value: number; pitch?: number 
       }
     }
     return { circles: nodes, width: usedCols * pitch };
-  }, [text, pitch]);
+  }, [text, pitch, value]);
 
   return (
     <span role="img" aria-label={money(value)} className="dot-number">

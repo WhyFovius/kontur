@@ -158,31 +158,42 @@
   --font-ui: "Inter", "Exo 2", system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
   --font-brand: var(--font-display);
 
-  /* M3 Expressive signature shapes. Large containers keep readable text
-     geometry but use asymmetric “fan/gem/arch” corners; small expressive
-     objects (icon tiles, loaders, mascot stages) morph between cookie and
-     clover radii. */
-  --shape-xs: 8px 12px 10px 6px;
-  --shape-sm: 12px 18px 14px 8px;
-  --shape-md: 18px 24px 20px 10px;
-  --shape-lg: 26px 34px 28px 12px;
-  --shape-xl: 36px 46px 38px 16px;
-  --shape-xxl: 48px 60px 50px 20px;
+  /* Standardized shape system.
+     Corner scale = M3 corner radius scale (single values only, so the
+     same tokens are valid for native border-radius AND for Material Web
+     per-corner shape tokens). Exactly one asymmetry is allowed: the
+     Aéza «keycap corner» on interactive containers (buttons, chips, nav)
+     echoing the keyboard-key logo. Panels/cards/rows always use the
+     uniform scale; cookie/clover/keycap percentages are reserved for
+     small SQUARE tiles (icon tiles, loader, avatars), arch only for
+     portrait media frames. Never put percentage/arch shapes on wide
+     text containers — the radii eat the text safe area. */
+  --shape-xs: 4px;
+  --shape-sm: 8px;
+  --shape-md: 12px;
+  --shape-lg: 16px;
+  --shape-lg-inc: 20px;
+  --shape-xl: 28px;
+  --shape-xl-inc: 32px;
+  --shape-xxl: 48px;
   --shape-full: 9999px;
-  --shape-button: 18px 26px 18px 10px;
-  --shape-button-pressed: 12px 16px 12px 8px;
-  --shape-chip: 14px 20px 14px 8px;
+  --shape-button: 16px 16px 16px 8px;
+  --shape-button-pressed: 10px 10px 10px 6px;
+  --shape-chip: 10px 10px 10px 6px;
+  --shape-nav: 18px 18px 18px 10px;
   --shape-keycap: 32%;
   --shape-squircle: 38%;
-  --shape-arch: 999px 999px 38px 38px;
-  --shape-fan: 14px 46px 14px 46px;
-  --shape-gem: 30px 12px 30px 12px;
-  --shape-clamp: 42px 42px 12px 12px;
+  --shape-arch: 999px 999px 24px 24px;
   --shape-cookie: 58% 42% 46% 54% / 44% 54% 46% 56%;
   --shape-cookie-alt: 42% 58% 55% 45% / 56% 45% 55% 44%;
   --shape-clover: 46% 54% 48% 52% / 54% 46% 52% 48%;
-  --shape-panel-alt: 38px 38px 16px 46px;
-  --shape-expressive-hero: 54px 54px 54px 18px;
+  /* Retired expressive aliases kept for legacy selectors; all resolve to
+     the uniform scale so older rules render standardized geometry. */
+  --shape-fan: 28px;
+  --shape-gem: 20px;
+  --shape-clamp: 28px;
+  --shape-panel-alt: 28px;
+  --shape-expressive-hero: 28px;
 
   --elevation-1: 0 1px 3px rgba(0, 0, 0, 0.07), 0 4px 14px -6px rgba(24, 45, 72, 0.14);
   --elevation-2: 0 2px 6px rgba(0, 0, 0, 0.08), 0 14px 34px -12px rgba(24, 45, 72, 0.22);
@@ -193,11 +204,27 @@
   --state-pressed: rgba(24, 45, 72, 0.12);
   --focus-ring: #00749e;
 
-  --motion-emphasized: cubic-bezier(0.05, 0.7, 0.1, 1);
+  /* M3 easing sets (used for CSS transitions; component motion runs on
+     the spring physics tokens in motion.ts). Pairs per M3 guidance:
+     emphasized 500ms begin+end on screen, emphasized-decelerate 400ms
+     enter, emphasized-accelerate 200ms exit; standard 300/250/200ms. */
+  --motion-emphasized: cubic-bezier(0.2, 0, 0, 1);
   --motion-emphasized-decelerate: cubic-bezier(0.05, 0.7, 0.1, 1);
   --motion-emphasized-accelerate: cubic-bezier(0.3, 0, 0.8, 0.15);
   --motion-standard: cubic-bezier(0.2, 0, 0, 1);
+  --motion-standard-decelerate: cubic-bezier(0, 0, 0, 1);
+  --motion-standard-accelerate: cubic-bezier(0.3, 0, 1, 1);
   --motion-shape: cubic-bezier(0.34, 1.45, 0.42, 1);
+  --dur-short-1: 50ms;
+  --dur-short-2: 100ms;
+  --dur-short-3: 150ms;
+  --dur-short-4: 200ms;
+  --dur-medium-1: 250ms;
+  --dur-medium-2: 300ms;
+  --dur-medium-3: 350ms;
+  --dur-medium-4: 400ms;
+  --dur-long-1: 450ms;
+  --dur-long-2: 500ms;
 }
 
 :root[data-theme="dark"] {
@@ -325,15 +352,49 @@
   --md-sys-shape-corner-extra-large: var(--shape-xl);
   --md-sys-shape-corner-full: var(--shape-full);
 
-  --md-filled-button-container-shape: var(--shape-button);
-  --md-filled-tonal-button-container-shape: var(--shape-button);
-  --md-outlined-button-container-shape: var(--shape-button);
-  --md-text-button-container-shape: var(--shape-button);
+  /* Material Web resolves component shapes PER CORNER
+     (--md-<comp>-container-shape-start-start, …). Feeding a 4-value
+     border-radius shorthand into --md-*-container-shape makes every
+     corner declaration invalid and the buttons render square — so the
+     signature «keycap corner» is spelled out corner by corner here and
+     container-shape itself stays a valid single-value fallback. */
+  --md-filled-button-container-shape: 16px;
+  --md-filled-button-container-shape-start-start: 16px;
+  --md-filled-button-container-shape-start-end: 16px;
+  --md-filled-button-container-shape-end-end: 16px;
+  --md-filled-button-container-shape-end-start: 8px;
+  --md-filled-tonal-button-container-shape: 16px;
+  --md-filled-tonal-button-container-shape-start-start: 16px;
+  --md-filled-tonal-button-container-shape-start-end: 16px;
+  --md-filled-tonal-button-container-shape-end-end: 16px;
+  --md-filled-tonal-button-container-shape-end-start: 8px;
+  --md-outlined-button-container-shape: 16px;
+  --md-outlined-button-container-shape-start-start: 16px;
+  --md-outlined-button-container-shape-start-end: 16px;
+  --md-outlined-button-container-shape-end-end: 16px;
+  --md-outlined-button-container-shape-end-start: 8px;
+  --md-text-button-container-shape: 16px;
+  --md-text-button-container-shape-start-start: 16px;
+  --md-text-button-container-shape-start-end: 16px;
+  --md-text-button-container-shape-end-end: 16px;
+  --md-text-button-container-shape-end-start: 8px;
   --md-icon-button-state-layer-shape: var(--shape-keycap);
-  --md-input-chip-container-shape: var(--shape-chip);
-  --md-assist-chip-container-shape: var(--shape-chip);
-  --md-filter-chip-container-shape: var(--shape-chip);
-  --md-slider-handle-shape: var(--shape-cookie);
+  --md-input-chip-container-shape: 10px;
+  --md-input-chip-container-shape-start-start: 10px;
+  --md-input-chip-container-shape-start-end: 10px;
+  --md-input-chip-container-shape-end-end: 10px;
+  --md-input-chip-container-shape-end-start: 6px;
+  --md-assist-chip-container-shape: 10px;
+  --md-assist-chip-container-shape-start-start: 10px;
+  --md-assist-chip-container-shape-start-end: 10px;
+  --md-assist-chip-container-shape-end-end: 10px;
+  --md-assist-chip-container-shape-end-start: 6px;
+  --md-filter-chip-container-shape: 10px;
+  --md-filter-chip-container-shape-start-start: 10px;
+  --md-filter-chip-container-shape-start-end: 10px;
+  --md-filter-chip-container-shape-end-end: 10px;
+  --md-filter-chip-container-shape-end-start: 6px;
+  --md-slider-handle-shape: var(--shape-full);
   --md-slider-active-track-shape: var(--shape-full);
   --md-slider-inactive-track-shape: var(--shape-full);
 
