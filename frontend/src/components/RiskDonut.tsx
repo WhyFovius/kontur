@@ -1,4 +1,5 @@
 import { motion } from "framer-motion";
+import { useRef, useState } from "react";
 import type { RiskLevel, Summary } from "../types";
 import { RISK_LABELS } from "../types";
 import { integer } from "../format";
@@ -41,11 +42,37 @@ export function RiskDonut({ summary, activeRisk, onSelectRisk }: RiskDonutProps)
     onCommit: (value, meta) => onSelectRisk(meta.tappedSelected ? "" : value),
   });
 
-  const effectiveRisk: RiskLevel | "" = drag.active ?? "";
+  const [arcPreview, setArcPreview] = useState<RiskLevel | null>(null);
+  const arcDownRef = useRef<{ key: RiskLevel; moved: boolean } | null>(null);
+  const effectiveRisk: RiskLevel | "" = arcPreview ?? drag.active ?? "";
   const total = SEGMENTS.reduce((sum, seg) => sum + summary[seg.field], 0);
   const activeValue = effectiveRisk
     ? summary[SEGMENTS.find((seg) => seg.key === effectiveRisk)?.field ?? "highRisk"]
     : total;
+
+  const previewArc = (key: RiskLevel) => {
+    setArcPreview(key);
+    if (arcDownRef.current && arcDownRef.current.key !== key) {
+      arcDownRef.current.moved = true;
+    }
+  };
+
+  const beginArc = (key: RiskLevel, event: React.PointerEvent<SVGCircleElement>) => {
+    if (event.pointerType === "mouse" && event.button !== 0) return;
+    arcDownRef.current = { key, moved: false };
+    setArcPreview(key);
+  };
+
+  const finishArc = (key: RiskLevel) => {
+    const down = arcDownRef.current;
+    arcDownRef.current = null;
+    if (down) {
+      onSelectRisk(
+        !down.moved && down.key === activeRisk && key === activeRisk ? "" : key,
+      );
+    }
+    setArcPreview(null);
+  };
 
   let cursor = 0;
   const arcs = SEGMENTS.map((seg) => {
@@ -65,6 +92,10 @@ export function RiskDonut({ summary, activeRisk, onSelectRisk }: RiskDonutProps)
           viewBox="0 0 180 180"
           role="img"
           aria-label={`Распределение риска: высокий ${integer(summary.highRisk)}, средний ${integer(summary.mediumRisk)}, низкий ${integer(summary.lowRisk)}, без оценки ${integer(summary.unratedCount)}`}
+          onPointerLeave={() => {
+            arcDownRef.current = null;
+            setArcPreview(null);
+          }}
         >
           <circle className="donut-track" cx="90" cy="90" r={RADIUS} />
           <g className="donut-arcs">
@@ -86,6 +117,9 @@ export function RiskDonut({ summary, activeRisk, onSelectRisk }: RiskDonutProps)
                     opacity: dimmed ? 0.28 : 1,
                   }}
                   transition={springEmphasized}
+                  onPointerEnter={() => previewArc(arc.key)}
+                  onPointerDown={(event) => beginArc(arc.key, event)}
+                  onPointerUp={() => finishArc(arc.key)}
                 />
               );
             })}

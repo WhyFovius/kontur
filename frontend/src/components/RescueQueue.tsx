@@ -1,6 +1,7 @@
 import { motion } from "framer-motion";
 import { integer, money } from "../format";
 import { fadeRise, springEmphasized, springSnappy } from "../motion";
+import { MascotImage } from "./Brand";
 import type { RescueQueueData, RescueQueueItem, RiskLevel } from "../types";
 import {
   IconArrowUpRight,
@@ -54,8 +55,13 @@ export function RescueQueue({
             Сначала — где один контакт спасает больше всего денег в день.
           </p>
         </div>
-        <span className="rescue-live" role="status">
-          <i aria-hidden="true" /> live
+        <span className="rescue-heading-side">
+          <span className="rescue-mascot" aria-hidden="true">
+            <MascotImage pose={data?.items.length ? "business" : "calm"} />
+          </span>
+          <span className="rescue-live" role="status">
+            <i aria-hidden="true" /> live
+          </span>
         </span>
       </div>
 

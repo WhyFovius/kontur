@@ -207,17 +207,74 @@ def _money(value: Any, field: str) -> int:
     return int(number)
 
 
+_TRUE_VALUES = {
+    "true",
+    "t",
+    "1",
+    "yes",
+    "y",
+    "on",
+    "enabled",
+    "enable",
+    "active",
+    "activated",
+    "available",
+    "да",
+    "включено",
+    "включен",
+    "активен",
+    "активна",
+    "активно",
+    "истина",
+}
+_FALSE_VALUES = {
+    "false",
+    "f",
+    "0",
+    "no",
+    "n",
+    "off",
+    "disabled",
+    "disable",
+    "inactive",
+    "deactivated",
+    "unavailable",
+    "нет",
+    "выключено",
+    "выключен",
+    "неактивен",
+    "неактивна",
+    "неактивно",
+    "ложь",
+    "",
+}
+
+
 def _boolean(value: Any, field: str) -> bool:
+    """Accept the boolean spellings real exported snapshots actually use.
+
+    The domain intentionally checks ``bonusState is True``; normalization is
+    therefore the one place where strings such as ``"active"``, ``"on"``,
+    numeric flags and small status objects become a real bool. Unknown
+    values still fail the whole snapshot instead of being guessed.
+    """
     if isinstance(value, bool):
         return value
-    if value in (0, 1):
+    if value is None:
+        return False
+    if isinstance(value, (int, float)) and value in (0, 1):
         return bool(value)
     if isinstance(value, str):
-        normalized = value.strip().casefold()
-        if normalized in {"true", "1", "yes"}:
+        normalized = value.strip().casefold().replace("ё", "е")
+        if normalized in _TRUE_VALUES:
             return True
-        if normalized in {"false", "0", "no"}:
+        if normalized in _FALSE_VALUES:
             return False
+    if isinstance(value, dict):
+        lowered = {str(key).strip().casefold(): item for key, item in value.items()}
+        for key in ("active", "enabled", "isactive", "isenabled", "value", "state", "status"):
+            if key in lowered:
+                return _boolean(lowered[key], field)
     raise SnapshotValidationError(f"{field}: ожидается true или false")
 
 

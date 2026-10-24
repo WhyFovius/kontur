@@ -1825,3 +1825,531 @@ textarea {
   .topbar-actions { gap: 7px; }
   .sync-capsule-note { max-width: min(48vw, 190px); }
 }
+
+/* ==========================================================================
+   Feedback round 16 — screenshot pass
+   - honest circular grab/theme controls;
+   - the sync note becomes part of the topbar surface;
+   - Aéza-тян inbox separates unread from the read archive;
+   - dashboard pages use consistent dense grids without filler widgets.
+   ========================================================================== */
+
+body {
+  transition: background-color .45s cubic-bezier(.22, .78, .24, 1), color .45s cubic-bezier(.22, .78, .24, 1);
+}
+
+.app-shell {
+  transition: grid-template-columns .68s cubic-bezier(.22, .78, .24, 1);
+}
+.sidebar {
+  transition: width .68s cubic-bezier(.22, .78, .24, 1);
+}
+
+.theme-toggle-button,
+.theme-toggle-button:hover,
+.theme-toggle-button:active,
+.theme-toggle-button:focus-visible {
+  border-radius: 50%;
+}
+
+.expressive-slider-handle,
+.expressive-slider[data-dragging] .expressive-slider-handle,
+.expressive-slider:has(> .expressive-slider-input:focus-visible) .expressive-slider-handle {
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  flex-direction: row;
+}
+
+/* Sync is a tonal inset of the same floating bar, not a second heavy card. */
+.topbar .sync-capsule.sync-capsule-note {
+  align-self: stretch;
+  min-height: calc(var(--upload-height) - 4px);
+  padding: 6px 14px 6px 11px;
+  border: 0;
+  border-radius: 23px;
+  background: color-mix(in srgb, var(--md-surface-low) 72%, transparent);
+  box-shadow:
+    inset 0 0 0 1px color-mix(in srgb, var(--md-outline-variant) 26%, transparent),
+    inset 0 1px 0 color-mix(in srgb, #ffffff 28%, transparent);
+}
+.topbar.is-scrolled .sync-capsule.sync-capsule-note {
+  border-radius: 16px;
+  background: color-mix(in srgb, var(--md-surface-low) 64%, transparent);
+}
+.topbar .sync-capsule-note.is-error {
+  background: color-mix(in srgb, var(--risk-high-container) 76%, transparent);
+  box-shadow:
+    inset 0 0 0 1px color-mix(in srgb, var(--risk-high-accent) 28%, transparent),
+    inset 0 1px 0 color-mix(in srgb, #ffffff 22%, transparent);
+}
+
+/* Dense, consistent page rhythm. Existing content is packed into real
+   work grids; no decorative filler is invented to occupy space. */
+.page-view {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+}
+.page-view > .panel,
+.page-view > section,
+.page-view > .metric-grid,
+.page-view > .model-grid {
+  margin-bottom: 0;
+}
+.page-heading {
+  padding-top: 24px;
+  padding-bottom: 2px;
+}
+.page-heading-compact {
+  padding-top: 22px;
+  padding-bottom: 2px;
+}
+.main-content { padding-bottom: 40px; }
+
+.overview-heading {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(360px, 430px);
+  align-items: stretch;
+}
+.overview-heading .page-heading-copy { align-self: center; }
+.overview-heading .heading-side { height: 100%; }
+.overview-heading .mascot-stage {
+  flex: 1;
+  width: 100%;
+}
+
+.overview-workgrid {
+  display: grid;
+  grid-template-columns: minmax(0, 1.22fr) minmax(520px, 1.55fr);
+  gap: 18px;
+  align-items: start;
+}
+.overview-workgrid > .panel { margin: 0; }
+.overview-analytics { align-items: stretch; }
+.overview-analytics > .panel { height: 100%; }
+.overview-analytics .risk-panel > .panel-hint { margin-top: auto; }
+
+.overview-support-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 3fr) minmax(280px, 1fr);
+  gap: 18px;
+  align-items: stretch;
+}
+.overview-support-grid .overview-insights {
+  height: 100%;
+  grid-auto-rows: minmax(0, 1fr);
+  gap: 18px;
+  margin: 0;
+}
+.overview-support-grid .insight-panel,
+.overview-segment-summary { height: 100%; }
+.overview-segment-summary {
+  display: flex;
+  flex-direction: column;
+}
+.overview-segment-value {
+  display: block;
+  margin-top: 4px;
+  font-family: var(--font-display);
+  font-size: clamp(40px, 4vw, 58px);
+  line-height: 1;
+  letter-spacing: -.045em;
+  font-variant-numeric: tabular-nums;
+}
+.overview-segment-caption {
+  display: block;
+  margin-top: 8px;
+  color: var(--md-on-surface-variant);
+  font-size: 13px;
+  line-height: 1.45;
+}
+.overview-segment-list {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 9px;
+  margin: 18px 0;
+}
+.overview-segment-list > div {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 10px 12px;
+  border-radius: 15px;
+  background: var(--md-surface-low);
+}
+.overview-segment-list dt {
+  color: var(--md-on-surface-variant);
+  font-size: 12px;
+  font-weight: 700;
+}
+.overview-segment-list dd {
+  margin: 0;
+  font-weight: 850;
+  font-variant-numeric: tabular-nums;
+}
+.overview-segment-summary .donut-open-segment { margin-top: auto; }
+.donut-open-segment {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  min-height: 42px;
+  margin-top: 14px;
+  padding: 0 16px;
+  border: 1px solid color-mix(in srgb, var(--md-primary) 34%, transparent);
+  border-radius: var(--shape-full);
+  background: var(--md-secondary-container);
+  color: var(--md-on-secondary-container);
+  font: inherit;
+  font-size: 13px;
+  font-weight: 800;
+  cursor: pointer;
+}
+.donut-open-segment svg { width: 16px; height: 16px; }
+.donut-open-segment:hover { background: color-mix(in srgb, var(--brand-sky) 22%, var(--md-secondary-container)); }
+.donut-open-segment:focus-visible { outline: 3px solid var(--focus-ring); outline-offset: 2px; }
+
+/* Aéza-тян as a small data-bound guide on work pages. */
+.mascot-tip {
+  position: relative;
+  display: grid;
+  grid-template-columns: 84px minmax(0, 1fr) 34px;
+  gap: 16px;
+  align-items: center;
+  padding: 14px 16px;
+  border: 1px solid color-mix(in srgb, var(--brand-sky) 34%, var(--md-outline-variant));
+  border-radius: 28px;
+  background:
+    radial-gradient(320px 150px at 0% 0%, color-mix(in srgb, var(--brand-sky) 13%, transparent), transparent 66%),
+    var(--md-surface-lowest);
+  box-shadow: var(--elevation-1);
+}
+.mascot-tip-figure {
+  width: 84px;
+  height: 84px;
+  overflow: hidden;
+  display: grid;
+  place-items: end center;
+  border-radius: 24px;
+  background: linear-gradient(160deg, #000000, var(--brand-navy));
+}
+.mascot-tip-figure .mascot-image {
+  width: 76px;
+  height: 84px;
+  object-fit: cover;
+  object-position: top center;
+}
+.mascot-tip-copy { min-width: 0; }
+.mascot-tip-copy > span {
+  display: block;
+  color: var(--md-primary);
+  font-size: 10.5px;
+  font-weight: 850;
+  letter-spacing: .13em;
+  text-transform: uppercase;
+}
+.mascot-tip-copy > strong {
+  display: block;
+  margin-top: 3px;
+  font-family: var(--font-display);
+  font-size: 17px;
+  line-height: 1.2;
+}
+.mascot-tip-copy p {
+  margin: 5px 0 0;
+  color: var(--md-on-surface-variant);
+  font-size: 13px;
+  line-height: 1.5;
+}
+.mascot-tip-action {
+  margin-top: 8px;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--md-primary);
+  font: inherit;
+  font-size: 13px;
+  font-weight: 800;
+  cursor: pointer;
+}
+.mascot-tip-close {
+  width: 34px;
+  height: 34px;
+  display: grid;
+  place-items: center;
+  border: 0;
+  border-radius: 50%;
+  background: var(--state-hover);
+  color: var(--md-on-surface-variant);
+  font-size: 20px;
+  line-height: 1;
+  cursor: pointer;
+}
+.mascot-tip-action:focus-visible,
+.mascot-tip-close:focus-visible { outline: 3px solid var(--focus-ring); outline-offset: 2px; }
+
+.rescue-heading-side {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  flex: none;
+}
+.rescue-mascot {
+  width: 54px;
+  height: 54px;
+  overflow: hidden;
+  display: grid;
+  place-items: end center;
+  border-radius: 18px;
+  background: linear-gradient(155deg, #000000, var(--brand-navy));
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--brand-sky) 28%, transparent);
+}
+.rescue-mascot .mascot-image {
+  width: 50px;
+  height: 54px;
+  object-fit: cover;
+  object-position: top center;
+}
+
+/* RiskStream becomes a pinned bucket inspector. */
+.riskstream-hint {
+  margin: -2px 0 4px;
+  color: rgba(255, 255, 255, .62);
+  font-size: 12.5px;
+  line-height: 1.45;
+}
+.riskstream-svg { cursor: grab; }
+.riskstream-svg:active { cursor: grabbing; }
+.riskstream-inspector {
+  margin-top: 14px;
+  padding: 14px;
+  border: 1px solid rgba(255, 255, 255, .13);
+  border-radius: 20px;
+  background: rgba(255, 255, 255, .055);
+}
+.riskstream-inspector-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 14px;
+}
+.riskstream-inspector-head span {
+  display: block;
+  color: rgba(255, 255, 255, .58);
+  font-size: 10.5px;
+  font-weight: 800;
+  letter-spacing: .12em;
+  text-transform: uppercase;
+}
+.riskstream-inspector-head strong {
+  display: block;
+  margin-top: 3px;
+  font-size: 14px;
+  line-height: 1.35;
+}
+.riskstream-inspector-head > button {
+  flex: none;
+  min-height: 34px;
+  padding: 0 12px;
+  border: 1px solid rgba(255, 255, 255, .16);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, .07);
+  color: #ffffff;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 750;
+  cursor: pointer;
+}
+.riskstream-customer-list {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 9px;
+  margin-top: 12px;
+}
+.riskstream-customer-list > button {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 11px 12px;
+  border: 1px solid rgba(255, 255, 255, .11);
+  border-radius: 16px;
+  background: rgba(0, 0, 0, .18);
+  color: #ffffff;
+  font: inherit;
+  cursor: pointer;
+}
+.riskstream-customer-list > button:hover:not(:disabled) { background: rgba(255, 255, 255, .1); }
+.riskstream-customer-list > button:disabled { cursor: default; opacity: .72; }
+.riskstream-customer-list > button > span {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  text-align: left;
+}
+.riskstream-customer-list > button strong {
+  overflow: hidden;
+  font-size: 12.5px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.riskstream-customer-list > button small {
+  overflow: hidden;
+  color: rgba(255, 255, 255, .58);
+  font-size: 11px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.riskstream-customer-list > button b {
+  flex: none;
+  font-size: 13px;
+  font-variant-numeric: tabular-nums;
+}
+.riskstream-more {
+  grid-column: 1 / -1;
+  color: rgba(255, 255, 255, .58);
+  font-size: 12px;
+}
+.riskstream-inspector > p {
+  margin: 12px 0 0;
+  color: rgba(255, 255, 255, .62);
+  font-size: 12.5px;
+}
+.riskstream-axis {
+  height: 36px;
+  margin-top: 8px;
+}
+.riskstream-axis button {
+  position: absolute;
+  top: 0;
+  padding: 7px 9px;
+  border: 0;
+  border-radius: 999px;
+  background: transparent;
+  color: rgba(255, 255, 255, .55);
+  font: inherit;
+  font-size: 11px;
+  white-space: nowrap;
+  cursor: pointer;
+}
+.riskstream-axis button.is-active {
+  background: rgba(255, 255, 255, .1);
+  color: #ffffff;
+  font-weight: 800;
+}
+.riskstream-axis button.is-pinned {
+  box-shadow: inset 0 0 0 1px rgba(76, 198, 241, .72);
+}
+.riskstream-axis button:focus-visible,
+.riskstream-inspector button:focus-visible {
+  outline: 2px solid #ffffff;
+  outline-offset: 2px;
+}
+
+/* Inbox folders: unread is the desk, read is the archive drawer. */
+.alerts-folders {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
+  align-items: center;
+  gap: 7px;
+  margin: 0 18px 12px;
+  padding: 5px;
+  border-radius: 999px;
+  background: var(--md-surface-high);
+}
+.alerts-folders > button {
+  min-width: 0;
+  min-height: 38px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  padding: 0 12px;
+  border: 0;
+  border-radius: 999px;
+  background: transparent;
+  color: var(--md-on-surface-variant);
+  font: inherit;
+  font-size: 12.5px;
+  font-weight: 800;
+  cursor: pointer;
+}
+.alerts-folders > button.is-active {
+  background: var(--md-surface-lowest);
+  color: var(--md-on-surface);
+  box-shadow: var(--elevation-1);
+}
+.alerts-folders > button b {
+  min-width: 22px;
+  padding: 2px 6px;
+  border-radius: 999px;
+  background: var(--md-secondary-container);
+  color: var(--md-on-secondary-container);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+}
+.alerts-folder-arrow {
+  color: var(--md-on-surface-variant);
+  font-size: 15px;
+  font-weight: 900;
+}
+.alerts-folders > button:focus-visible,
+.alerts-empty button:focus-visible { outline: 3px solid var(--focus-ring); outline-offset: 2px; }
+.alerts-list { align-content: start; }
+.alerts-item {
+  flex: 0 0 auto;
+  height: auto;
+  min-height: max-content;
+}
+.alerts-item-main { height: auto; }
+.alerts-unread-button { font-size: 18px; line-height: 1; }
+.alerts-empty button {
+  margin-top: 10px;
+  min-height: 38px;
+  padding: 0 14px;
+  border: 0;
+  border-radius: 999px;
+  background: var(--md-secondary-container);
+  color: var(--md-on-secondary-container);
+  font: inherit;
+  font-size: 12.5px;
+  font-weight: 800;
+  cursor: pointer;
+}
+
+/* Model page fills its two columns instead of leaving the what-if card
+   floating above a much taller weights panel. */
+.model-grid { align-items: stretch; }
+.model-grid .whatif-panel { top: 112px; }
+.weight-grid { grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); }
+
+@media (max-width: 1320px) {
+  .overview-workgrid { grid-template-columns: minmax(0, 1fr); }
+}
+@media (max-width: 1180px) {
+  .overview-support-grid { grid-template-columns: minmax(0, 1fr); }
+}
+@media (max-width: 980px) {
+  .overview-heading { grid-template-columns: minmax(0, 1fr); }
+  .overview-heading .heading-side { width: 100%; }
+}
+@media (max-width: 720px) {
+  .riskstream-customer-list { grid-template-columns: minmax(0, 1fr); }
+  .riskstream-inspector-head { flex-direction: column; }
+  .alerts-folders { margin-inline: 12px; }
+  .alerts-folders > button { padding-inline: 8px; font-size: 11.5px; }
+  .mascot-tip { grid-template-columns: 64px minmax(0, 1fr) 32px; gap: 12px; padding: 12px; }
+  .mascot-tip-figure { width: 64px; height: 64px; border-radius: 19px; }
+  .mascot-tip-figure .mascot-image { width: 58px; height: 64px; }
+  .overview-segment-list { grid-template-columns: minmax(0, 1fr); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  body,
+  .app-shell,
+  .sidebar { transition: none; }
+}

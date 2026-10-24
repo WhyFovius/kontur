@@ -72,14 +72,15 @@ interface RealtimeAlertsProps {
 export function RealtimeAlerts({ onOpenCustomer, onPortfolioChange }: RealtimeAlertsProps) {
   const [items, setItems] = useState<RiskNotification[]>([]);
   const [unreadCount, setUnreadCount] = useState(0);
+  const [readCount, setReadCount] = useState(0);
   const [criticalCount, setCriticalCount] = useState(0);
   const [open, setOpen] = useState(false);
+  const [folder, setFolder] = useState<"unread" | "read">("unread");
   const [connected, setConnected] = useState(false);
   const [thought, setThought] = useState<RiskNotification | null>(null);
   const [minimumScore, setMinimumScore] = useState(65);
   const [criticalOnly, setCriticalOnly] = useState(false);
   const [stampingIds, setStampingIds] = useState<Set<number>>(() => new Set());
-  const dismissedIdsRef = useRef<Set<number>>(new Set());
   const stampTimersRef = useRef<number[]>([]);
   const knownMaxIdRef = useRef(0);
   const initializedRef = useRef(false);
@@ -93,24 +94,16 @@ export function RealtimeAlerts({ onOpenCustomer, onPortfolioChange }: RealtimeAl
 
   const mergeItems = useCallback((incoming: RiskNotification[]) => {
     setItems((previous) => {
-      const byId = new Map(
-        previous
-          .filter((item) => !dismissedIdsRef.current.has(item.id))
-          .map((item) => [item.id, item]),
-      );
-      incoming
-        .filter((item) => !dismissedIdsRef.current.has(item.id))
-        .forEach((item) => byId.set(item.id, item));
-      return sortNotifications([...byId.values()]).slice(0, 80);
+      const byId = new Map(previous.map((item) => [item.id, item]));
+      incoming.forEach((item) => byId.set(item.id, item));
+      return sortNotifications([...byId.values()]).slice(0, 140);
     });
   }, []);
 
-  const stampAndDismiss = useCallback((ids: number[], delay = 1080) => {
+  const stampAndArchive = useCallback((ids: number[], delay = 1080) => {
     if (ids.length === 0) return;
     setStampingIds((previous) => new Set([...previous, ...ids]));
     const timer = window.setTimeout(() => {
-      ids.forEach((id) => dismissedIdsRef.current.add(id));
-      setItems((previous) => previous.filter((item) => !ids.includes(item.id)));
       setStampingIds((previous) => {
         const next = new Set(previous);
         ids.forEach((id) => next.delete(id));
@@ -144,6 +137,7 @@ export function RealtimeAlerts({ onOpenCustomer, onPortfolioChange }: RealtimeAl
     const wasInitialized = initializedRef.current;
     initializedRef.current = true;
     setUnreadCount(payload.unreadCount);
+    setReadCount(payload.readCount ?? payload.items.filter((item) => item.isRead).length);
     setCriticalCount(payload.criticalCount);
     acceptIncoming(payload.items, wasInitialized);
     if (!wasInitialized) {
@@ -153,6 +147,32 @@ export function RealtimeAlerts({ onOpenCustomer, onPortfolioChange }: RealtimeAl
       }
     }
   }, [acceptIncoming, showThought]);
+
+  const loadFolder = useCallback(
+    async (nextFolder: "unread" | "read") => {
+      try {
+        const query = nextFolder === "read" ? "read_only=true" : "unread_only=true";
+        const payload = await api<NotificationList>(
+          `/api/v1/notifications?limit=50&${query}`,
+        );
+        setUnreadCount(payload.unreadCount);
+        setReadCount(payload.readCount ?? payload.items.filter((item) => item.isRead).length);
+        setCriticalCount(payload.criticalCount);
+        mergeItems(payload.items);
+      } catch {
+        /* Keep the already loaded folder contents on a transient failure. */
+      }
+    },
+    [mergeItems],
+  );
+
+  const switchFolder = useCallback(
+    (nextFolder: "unread" | "read") => {
+      setFolder(nextFolder);
+      void loadFolder(nextFolder);
+    },
+    [loadFolder],
+  );
 
   useEffect(() => {
     let cancelled = false;
@@ -210,6 +230,7 @@ export function RealtimeAlerts({ onOpenCustomer, onPortfolioChange }: RealtimeAl
         { method: "POST" },
       );
       setUnreadCount(result.unreadCount);
+      setReadCount((count) => count + 1);
       setItems((previous) =>
         sortNotifications(
           previous.map((candidate) =>
@@ -219,14 +240,40 @@ export function RealtimeAlerts({ onOpenCustomer, onPortfolioChange }: RealtimeAl
           ),
         ),
       );
-      if (item.severity === "critical") {
+      if (item.severity === "critical" && !item.resolvedAt) {
         setCriticalCount((count) => Math.max(0, count - 1));
       }
-      if (stamp) stampAndDismiss([item.id], 920);
+      if (stamp) stampAndArchive([item.id], 980);
     } catch {
       /* The stream/list will reconcile on the next successful sync. */
     }
-  }, [stampAndDismiss]);
+  }, [stampAndArchive]);
+
+  const markUnread = useCallback(async (item: RiskNotification) => {
+    if (!item.isRead) return;
+    try {
+      const result = await api<NotificationReadResult>(
+        `/api/v1/notifications/${item.id}/unread`,
+        { method: "POST" },
+      );
+      setUnreadCount(result.unreadCount);
+      setReadCount((count) => Math.max(0, count - 1));
+      if (item.severity === "critical" && !item.resolvedAt) {
+        setCriticalCount((count) => count + 1);
+      }
+      setItems((previous) =>
+        sortNotifications(
+          previous.map((candidate) =>
+            candidate.id === item.id
+              ? (result.notification ?? { ...candidate, isRead: false, readAt: null })
+              : candidate,
+          ),
+        ),
+      );
+    } catch {
+      /* The next list sync will reconcile the folder. */
+    }
+  }, []);
 
   const openItem = useCallback(
     (item: RiskNotification) => {
@@ -245,29 +292,39 @@ export function RealtimeAlerts({ onOpenCustomer, onPortfolioChange }: RealtimeAl
         method: "POST",
       });
       setUnreadCount(result.unreadCount);
+      setReadCount((count) => count + result.updatedCount);
       setCriticalCount(0);
       setItems((previous) =>
         sortNotifications(previous.map((item) => ({ ...item, isRead: true }))),
       );
       setThought(null);
-      stampAndDismiss(unreadIds, 1180);
+      stampAndArchive(unreadIds, 1220);
     } catch {
       /* Keep the current list; the next sync will retry. */
     }
-  }, [items, stampAndDismiss]);
+  }, [items, stampAndArchive]);
 
   const visibleItems = useMemo(
     () =>
-      items.filter(
-        (item) =>
+      items.filter((item) => {
+        const inFolder =
+          folder === "read"
+            ? item.isRead
+            : !item.isRead || stampingIds.has(item.id);
+        return (
+          inFolder &&
           (!criticalOnly || item.severity === "critical") &&
-          (item.score == null || item.score >= minimumScore || item.severity === "critical"),
-      ),
-    [criticalOnly, items, minimumScore],
+          (item.score == null || item.score >= minimumScore || item.severity === "critical")
+        );
+      }),
+    [criticalOnly, folder, items, minimumScore, stampingIds],
   );
   const focusItem = useMemo(
-    () => visibleItems.find((item) => !item.isRead) ?? null,
-    [visibleItems],
+    () =>
+      folder === "unread"
+        ? (visibleItems.find((item) => !item.isRead && !stampingIds.has(item.id)) ?? null)
+        : null,
+    [folder, stampingIds, visibleItems],
   );
   const mascotPose = criticalCount > 0 ? "business" : "calm";
 
@@ -363,6 +420,28 @@ export function RealtimeAlerts({ onOpenCustomer, onPortfolioChange }: RealtimeAl
               </button>
             </header>
 
+            <nav className="alerts-folders" aria-label="Папки уведомлений">
+              <button
+                type="button"
+                className={folder === "unread" ? "is-active" : ""}
+                onClick={() => switchFolder("unread")}
+                aria-pressed={folder === "unread"}
+              >
+                Непрочитанные
+                <b>{integer(unreadCount)}</b>
+              </button>
+              <span className="alerts-folder-arrow" aria-hidden="true">→</span>
+              <button
+                type="button"
+                className={folder === "read" ? "is-active" : ""}
+                onClick={() => switchFolder("read")}
+                aria-pressed={folder === "read"}
+              >
+                Прочитанные
+                <b>{integer(readCount)}</b>
+              </button>
+            </nav>
+
             <div className="alerts-controls">
               <span>
                 Критично от <strong>80</strong> · высокий риск от <strong>65</strong>
@@ -410,14 +489,29 @@ export function RealtimeAlerts({ onOpenCustomer, onPortfolioChange }: RealtimeAl
               {visibleItems.length === 0 ? (
                 <div className="alerts-empty">
                   <MascotImage pose="calm" className="alerts-empty-img" />
-                  <strong>Сейчас тихо.</strong>
-                  <span>Я слежу за ростом скора, ожиданиями оплаты и деньгами под угрозой.</span>
+                  <strong>{folder === "read" ? "Прочитанных пока нет." : "Непрочитанных нет."}</strong>
+                  <span>
+                    {folder === "read"
+                      ? "Сюда попадут уведомления после штампа «ПРОЧИТАНО»."
+                      : "Я слежу за ростом скора, ожиданиями оплаты и деньгами под угрозой."}
+                  </span>
+                  {folder === "unread" && readCount > 0 && (
+                    <button type="button" onClick={() => switchFolder("read")}>
+                      Открыть прочитанные →
+                    </button>
+                  )}
                 </div>
               ) : (
-                visibleItems.map((item) => (
-                  <article
+                <AnimatePresence initial={false}>
+                {visibleItems.map((item) => (
+                  <motion.article
+                    layout
                     key={item.id}
                     className={`alerts-item alerts-severity-${item.severity}${item.isRead ? " is-read" : ""}${stampingIds.has(item.id) ? " is-stamping" : ""}`}
+                    initial={{ opacity: 0, y: 8 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    exit={{ opacity: 0, x: 22, scale: 0.98 }}
+                    transition={{ default: springSnappy, opacity: springExEffects }}
                   >
                     <button type="button" className="alerts-item-main" onClick={() => openItem(item)}>
                       <span className="alerts-item-top">
@@ -439,15 +533,25 @@ export function RealtimeAlerts({ onOpenCustomer, onPortfolioChange }: RealtimeAl
                         {item.isRead ? " · прочитано" : ""}
                       </small>
                     </button>
-                    {!item.isRead && (
+                    {!item.isRead ? (
                       <button
                         type="button"
                         className="alerts-stamp-button"
                         onClick={() => void markRead(item, true)}
                         aria-label={`Отметить уведомление «${item.title}» прочитанным`}
-                        title="Поставить штамп «ПРОЧИТАНО»"
+                        title="Поставить штамп и перенести в «Прочитанные»"
                       >
                         <IconCheck />
+                      </button>
+                    ) : (
+                      <button
+                        type="button"
+                        className="alerts-stamp-button alerts-unread-button"
+                        onClick={() => void markUnread(item)}
+                        aria-label={`Вернуть уведомление «${item.title}» в непрочитанные`}
+                        title="Вернуть в «Непрочитанные»"
+                      >
+                        ↩
                       </button>
                     )}
                     <AnimatePresence>
@@ -464,16 +568,27 @@ export function RealtimeAlerts({ onOpenCustomer, onPortfolioChange }: RealtimeAl
                         </motion.span>
                       )}
                     </AnimatePresence>
-                  </article>
-                ))
+                  </motion.article>
+                ))}
+                </AnimatePresence>
               )}
             </div>
 
             <footer className="alerts-panel-foot">
-              <span>{integer(unreadCount)} непрочитанных</span>
-              <button type="button" onClick={() => void markAll()} disabled={unreadCount === 0}>
-                <IconCheck /> Прочитать все
-              </button>
+              <span>
+                {folder === "read"
+                  ? `${integer(readCount)} в папке «Прочитанные»`
+                  : `${integer(unreadCount)} непрочитанных`}
+              </span>
+              {folder === "unread" ? (
+                <button type="button" onClick={() => void markAll()} disabled={unreadCount === 0}>
+                  <IconCheck /> Всё в «Прочитанные»
+                </button>
+              ) : (
+                <button type="button" onClick={() => switchFolder("unread")}>
+                  ← Непрочитанные
+                </button>
+              )}
             </footer>
           </motion.aside>
         )}
@@ -482,7 +597,10 @@ export function RealtimeAlerts({ onOpenCustomer, onPortfolioChange }: RealtimeAl
       <motion.button
         type="button"
         className={`alerts-fab${criticalCount > 0 ? " has-critical" : ""}`}
-        onClick={() => setOpen((value) => !value)}
+        onClick={() => {
+          if (!open) switchFolder("unread");
+          setOpen((value) => !value);
+        }}
         aria-expanded={open}
         aria-label={`Уведомления Aéza-тян. Непрочитанных: ${unreadCount}, критических: ${criticalCount}`}
         whileHover={{ y: -2, scale: 1.03 }}

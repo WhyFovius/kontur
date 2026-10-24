@@ -1,5 +1,6 @@
 import { motion } from "framer-motion";
-import { springEmphasized } from "../motion";
+import { useState, type ReactNode } from "react";
+import { springEmphasized, springGentle } from "../motion";
 
 export function AezaLogo({
   compact = false,
@@ -20,8 +21,9 @@ export function AezaLogo({
 
 const LOGO_TILE_OFFSETS = [0, 27, 54, 81] as const;
 const LOGO_E_INDEX = 1;
-const LOGO_EXPAND_DELAYS = [0.18, 0.08, 0.15, 0.22] as const;
-const LOGO_COLLAPSE_DELAYS = [0, 0.1, 0.02, 0] as const;
+const LOGO_EXPAND_DELAYS = [0.24, 0.1, 0.19, 0.28] as const;
+const LOGO_COLLAPSE_DELAYS = [0.02, 0.18, 0.1, 0.16] as const;
+const LOGO_COLLAPSE_TIMES = [0, 0.52, 1] as const;
 
 /**
  * Sidebar logo morph built from the two official brand assets.
@@ -38,7 +40,7 @@ export function AnimatedAezaLogo({ collapsed }: { collapsed: boolean }) {
       className="aeza-logo-animated"
       initial={false}
       animate={{ width: collapsed ? 46 : 106 }}
-      transition={springEmphasized}
+      transition={springGentle}
       aria-hidden="true"
     >
       <motion.span
@@ -46,10 +48,14 @@ export function AnimatedAezaLogo({ collapsed }: { collapsed: boolean }) {
         initial={false}
         animate={{
           opacity: collapsed ? 1 : 0,
-          scale: collapsed ? 1 : 0.54,
+          scale: collapsed ? 1 : 0.58,
           x: collapsed ? 0 : 17,
         }}
-        transition={{ ...springEmphasized, delay: collapsed ? 0.18 : 0 }}
+        transition={
+          collapsed
+            ? { duration: 0.52, delay: 0.3, ease: [0.22, 0.78, 0.24, 1] }
+            : { ...springGentle, delay: 0 }
+        }
       >
         <img src="/static/brand/aeza-symbol.svg" alt="" draggable={false} />
       </motion.span>
@@ -57,7 +63,11 @@ export function AnimatedAezaLogo({ collapsed }: { collapsed: boolean }) {
         className="aeza-logo-slices"
         initial={false}
         animate={{ x: collapsed ? -17 : 0 }}
-        transition={springEmphasized}
+        transition={
+          collapsed
+            ? { duration: 0.68, ease: [0.22, 0.78, 0.24, 1] }
+            : springGentle
+        }
       >
         {LOGO_TILE_OFFSETS.map((offset, index) => (
           <motion.span
@@ -65,16 +75,33 @@ export function AnimatedAezaLogo({ collapsed }: { collapsed: boolean }) {
             className="aeza-logo-slice"
             initial={false}
             animate={{
-              x: collapsed ? LOGO_TILE_OFFSETS[LOGO_E_INDEX] : offset,
-              scale: collapsed ? (index === LOGO_E_INDEX ? 1.45 : 0.1) : 1,
-              opacity: collapsed ? 0 : 1,
+              x: collapsed
+                ? [
+                    offset,
+                    offset + (LOGO_TILE_OFFSETS[LOGO_E_INDEX] - offset) * 0.56,
+                    LOGO_TILE_OFFSETS[LOGO_E_INDEX],
+                  ]
+                : offset,
+              scale: collapsed
+                ? index === LOGO_E_INDEX
+                  ? [1, 1.06, 1.24]
+                  : [1, 0.82, 0.18]
+                : 1,
+              opacity: collapsed ? [1, 1, 0] : 1,
             }}
-            transition={{
-              ...springEmphasized,
-              delay: collapsed
-                ? LOGO_COLLAPSE_DELAYS[index]
-                : LOGO_EXPAND_DELAYS[index],
-            }}
+            transition={
+              collapsed
+                ? {
+                    duration: 0.68,
+                    times: [...LOGO_COLLAPSE_TIMES],
+                    ease: [0.22, 0.78, 0.24, 1],
+                    delay: LOGO_COLLAPSE_DELAYS[index],
+                  }
+                : {
+                    ...springGentle,
+                    delay: LOGO_EXPAND_DELAYS[index],
+                  }
+            }
           >
             <img
               src="/static/brand/aeza-logo.svg"
@@ -127,6 +154,70 @@ export function MascotImage({
       decoding="async"
       draggable={false}
     />
+  );
+}
+
+interface MascotTipProps {
+  storageKey: string;
+  eyebrow?: string;
+  title: string;
+  children: ReactNode;
+  pose?: MascotPose;
+  actionLabel?: string;
+  onAction?: () => void;
+  className?: string;
+}
+
+export function MascotTip({
+  storageKey,
+  eyebrow = "Aéza-тян подсказывает",
+  title,
+  children,
+  pose = "calm",
+  actionLabel,
+  onAction,
+  className = "",
+}: MascotTipProps) {
+  const [visible, setVisible] = useState(() => {
+    try {
+      return window.localStorage.getItem(`kontur:mascot-tip:${storageKey}`) !== "1";
+    } catch {
+      return true;
+    }
+  });
+  if (!visible) return null;
+  const dismiss = () => {
+    setVisible(false);
+    try {
+      window.localStorage.setItem(`kontur:mascot-tip:${storageKey}`, "1");
+    } catch {
+      /* Private browsing may reject storage; the tip is still closed. */
+    }
+  };
+  return (
+    <aside className={`mascot-tip ${className}`.trim()} aria-label={`${title}`}>
+      <span className="mascot-tip-figure" aria-hidden="true">
+        <MascotImage pose={pose} />
+      </span>
+      <div className="mascot-tip-copy">
+        <span>{eyebrow}</span>
+        <strong>{title}</strong>
+        <div>{children}</div>
+        {actionLabel && onAction ? (
+          <button type="button" className="mascot-tip-action" onClick={onAction}>
+            {actionLabel}
+          </button>
+        ) : null}
+      </div>
+      <button
+        type="button"
+        className="mascot-tip-close"
+        onClick={dismiss}
+        aria-label="Скрыть подсказку Aéza-тян"
+      >
+        ×
+      </button>
+    </aside>
   );
 }
 

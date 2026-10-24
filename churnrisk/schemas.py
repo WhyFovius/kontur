@@ -184,6 +184,7 @@ class NotificationListResponse(BaseModel):
     items: list[RiskNotification]
     total: int
     unreadCount: int
+    readCount: int
     criticalCount: int
     generatedAt: str
 

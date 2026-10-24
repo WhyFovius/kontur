@@ -217,6 +217,7 @@ paths:
       parameters:
         - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 100, default: 30 } }
         - { name: unread_only, in: query, schema: { type: boolean, default: false } }
+        - { name: read_only, in: query, schema: { type: boolean, default: false } }
       responses:
         '200':
           description: Risk notification inbox and unread counters.
@@ -246,6 +247,21 @@ paths:
       responses:
         '200':
           description: The updated notification.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/NotificationReadResponse' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/Unauthorized' }
+  /api/v1/notifications/{notification_id}/unread:
+    post:
+      tags: [Analytics]
+      summary: Move one notification from the read archive back to unread
+      security: [{ AdminSession: [] }]
+      parameters:
+        - { name: notification_id, in: path, required: true, schema: { type: integer } }
+      responses:
+        '200':
+          description: The notification restored to the unread folder.
           content:
             application/json:
               schema: { $ref: '#/components/schemas/NotificationReadResponse' }
@@ -681,11 +697,12 @@ components:
         isRead: { type: boolean }
     NotificationListResponse:
       type: object
-      required: [items, total, unreadCount, criticalCount, generatedAt]
+      required: [items, total, unreadCount, readCount, criticalCount, generatedAt]
       properties:
         items: { type: array, items: { $ref: '#/components/schemas/RiskNotification' } }
         total: { type: integer }
         unreadCount: { type: integer }
+        readCount: { type: integer }
         criticalCount: { type: integer }
         generatedAt: { type: string, format: date-time }
     NotificationReadResponse:

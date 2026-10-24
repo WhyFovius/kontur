@@ -111,6 +111,7 @@ export interface NotificationList {
   items: RiskNotification[];
   total: number;
   unreadCount: number;
+  readCount: number;
   criticalCount: number;
   generatedAt: string;
 }
