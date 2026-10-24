@@ -12,11 +12,13 @@ import {
   emphasizedTween,
   rowPageVariants,
   springEmphasized,
+  springFollow,
   springSnappy,
   staggerChild,
   staggerParent,
 } from "../motion";
 import { AnimatedNumber } from "./AnimatedNumber";
+import { useDragSelect } from "./useDragSelect";
 import {
   IconArrowLeft,
   IconArrowRight,
@@ -43,6 +45,7 @@ export const RISK_OPTIONS: RiskOption[] = [
   { value: "low", label: "Низкий" },
   { value: "unrated", label: "Нет оценки" },
 ];
+const RISK_VALUES = RISK_OPTIONS.map((option) => option.value);
 
 function SegmentedFilter({
   value,
@@ -51,26 +54,49 @@ function SegmentedFilter({
   value: RiskLevel | "";
   onChange: (value: RiskLevel | "") => void;
 }) {
+  const drag = useDragSelect<RiskLevel | "">({
+    values: RISK_VALUES,
+    selected: value,
+    axis: "x",
+    allowTouch: true,
+    onCommit: (next) => onChange(next),
+  });
+
   return (
-    <div className="segmented" role="group" aria-label="Фильтр по уровню риска">
+    <div
+      className="segmented drag-select drag-select-touch-x"
+      role="group"
+      aria-label="Фильтр по уровню риска. Можно зажать и вести указатель."
+      ref={drag.containerRef}
+      data-dragging={drag.dragging || undefined}
+      {...drag.containerHandlers}
+    >
+      {drag.thumbRect && (
+        <motion.span
+          className="segmented-thumb drag-thumb"
+          aria-hidden="true"
+          initial={false}
+          animate={{
+            x: drag.thumbRect.x,
+            y: drag.thumbRect.y,
+            width: drag.thumbRect.w,
+            height: drag.thumbRect.h,
+            opacity: 1,
+          }}
+          transition={springFollow}
+        />
+      )}
       {RISK_OPTIONS.map((option) => {
-        const selected = value === option.value;
+        const selected = drag.active === option.value;
         return (
           <button
             key={option.label}
+            ref={drag.registerItem(option.value)}
             type="button"
             className={`segmented-item${selected ? " is-selected" : ""}`}
-            aria-pressed={selected}
-            onClick={() => onChange(option.value)}
+            aria-pressed={value === option.value}
+            onClick={(event) => drag.handleItemClick(option.value, event)}
           >
-            {selected && (
-              <motion.span
-                className="segmented-thumb"
-                layoutId="risk-segment-thumb"
-                transition={springSnappy}
-                aria-hidden="true"
-              />
-            )}
             <span className="segmented-label">
               {option.value && (
                 <span className={`risk-dot risk-dot-${option.value}`} aria-hidden="true" />
@@ -520,9 +546,9 @@ export function CustomerList(props: CustomerListProps) {
     <>
       <div className="panel-heading table-heading">
         <div className="section-heading-copy">
-          <span className="eyebrow">Следующий шаг</span>
-          <h2>Клиенты, которым нужен контакт</h2>
-          <p>Откройте клиента — карточка развернётся прямо в списке.</p>
+          <span className="eyebrow">Рабочая очередь</span>
+          <h2>Приоритет контакта</h2>
+          <p>Фильтр можно переключать зажатием и ведением указателя. Откройте клиента — карточка развернётся прямо в списке.</p>
         </div>
         <SegmentedFilter value={risk} onChange={onRiskChange} />
       </div>
