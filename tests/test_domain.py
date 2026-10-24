@@ -116,9 +116,11 @@ class DomainTests(unittest.TestCase):
         from unittest.mock import patch
         snapshot = {"accounts": [{"id": 1, "services": [{"id": "nested", "status": "active"}]}],
                     "services": [{"id": "flat", "accountId": 1, "status": "active"}]}
-        with patch("churnrisk.storage.MAX_SERVICES", 1):
-            with self.assertRaises(SnapshotValidationError):
-                validate_snapshot(snapshot)
+        with (
+            patch("churnrisk.storage.MAX_SERVICES", 1),
+            self.assertRaises(SnapshotValidationError),
+        ):
+            validate_snapshot(snapshot)
 
     def test_invalid_amounts_and_duplicate_ids_are_rejected(self):
         for snapshot in (

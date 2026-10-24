@@ -2,7 +2,6 @@ from __future__ import annotations
 
 from typing import Any
 
-
 COLLECTION_ALIASES = {
     "accounts": ("accounts", "users", "customers", "clients"),
     "services": ("services", "subscriptions"),
@@ -49,7 +48,7 @@ def _fields(row: dict[str, Any], path: str) -> dict[str, Any]:
 
 def normalize_snapshot(value: Any) -> dict[str, list[dict[str, Any]]]:
     if not isinstance(value, dict):
-        raise ValueError("Snapshot must be a JSON object")
+        raise TypeError("Snapshot must be a JSON object")
     source = value
     collection_keys = {alias for aliases in COLLECTION_ALIASES.values() for alias in aliases}
     wrappers = [key for key in ("data", "snapshot") if key in source]

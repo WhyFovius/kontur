@@ -178,9 +178,9 @@
   --shape-xl-inc: 32px;
   --shape-xxl: 48px;
   --shape-full: 9999px;
-  --shape-button: 16px 16px 16px 8px;
-  --shape-button-pressed: 10px 10px 10px 6px;
-  --shape-chip: 10px 10px 10px 6px;
+  --shape-button: 16px;
+  --shape-button-pressed: 10px;
+  --shape-chip: 10px;
   --shape-nav: 18px 18px 18px 10px;
   --shape-keycap: 32%;
   --shape-squircle: 38%;
@@ -361,44 +361,46 @@
      (--md-<comp>-container-shape-start-start, …). Feeding a 4-value
      border-radius shorthand into --md-*-container-shape makes every
      corner declaration invalid and the buttons render square — so the
-     signature «keycap corner» is spelled out corner by corner here and
-     container-shape itself stays a valid single-value fallback. */
+     corners are spelled out corner by corner here and container-shape
+     itself stays a valid single-value fallback. All four corners are
+     EQUAL: a single smaller «signature» corner read as a rendering
+     defect in user testing, so controls get honestly uniform radii. */
   --md-filled-button-container-shape: 16px;
   --md-filled-button-container-shape-start-start: 16px;
   --md-filled-button-container-shape-start-end: 16px;
   --md-filled-button-container-shape-end-end: 16px;
-  --md-filled-button-container-shape-end-start: 8px;
+  --md-filled-button-container-shape-end-start: 16px;
   --md-filled-tonal-button-container-shape: 16px;
   --md-filled-tonal-button-container-shape-start-start: 16px;
   --md-filled-tonal-button-container-shape-start-end: 16px;
   --md-filled-tonal-button-container-shape-end-end: 16px;
-  --md-filled-tonal-button-container-shape-end-start: 8px;
+  --md-filled-tonal-button-container-shape-end-start: 16px;
   --md-outlined-button-container-shape: 16px;
   --md-outlined-button-container-shape-start-start: 16px;
   --md-outlined-button-container-shape-start-end: 16px;
   --md-outlined-button-container-shape-end-end: 16px;
-  --md-outlined-button-container-shape-end-start: 8px;
+  --md-outlined-button-container-shape-end-start: 16px;
   --md-text-button-container-shape: 16px;
   --md-text-button-container-shape-start-start: 16px;
   --md-text-button-container-shape-start-end: 16px;
   --md-text-button-container-shape-end-end: 16px;
-  --md-text-button-container-shape-end-start: 8px;
+  --md-text-button-container-shape-end-start: 16px;
   --md-icon-button-state-layer-shape: var(--shape-keycap);
   --md-input-chip-container-shape: 10px;
   --md-input-chip-container-shape-start-start: 10px;
   --md-input-chip-container-shape-start-end: 10px;
   --md-input-chip-container-shape-end-end: 10px;
-  --md-input-chip-container-shape-end-start: 6px;
+  --md-input-chip-container-shape-end-start: 10px;
   --md-assist-chip-container-shape: 10px;
   --md-assist-chip-container-shape-start-start: 10px;
   --md-assist-chip-container-shape-start-end: 10px;
   --md-assist-chip-container-shape-end-end: 10px;
-  --md-assist-chip-container-shape-end-start: 6px;
+  --md-assist-chip-container-shape-end-start: 10px;
   --md-filter-chip-container-shape: 10px;
   --md-filter-chip-container-shape-start-start: 10px;
   --md-filter-chip-container-shape-start-end: 10px;
   --md-filter-chip-container-shape-end-end: 10px;
-  --md-filter-chip-container-shape-end-start: 6px;
+  --md-filter-chip-container-shape-end-start: 10px;
 
   --md-ref-typeface-brand: "Exo 2", "Inter", system-ui, -apple-system, "Segoe UI", sans-serif;
   --md-ref-typeface-plain: "Inter", "Exo 2", system-ui, -apple-system, "Segoe UI", sans-serif;
