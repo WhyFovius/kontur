@@ -58,7 +58,6 @@
   padding: 18px 20px 20px; border-radius: 28px;
   background: rgba(255, 255, 255, .08);
   border: 1px solid rgba(255, 255, 255, .16);
-  backdrop-filter: blur(8px);
   box-shadow: 0 30px 50px -24px rgba(0, 0, 0, .55);
   display: flex; flex-direction: column; gap: 10px;
 }
@@ -213,9 +212,13 @@
 .login-orb {
   border-radius: var(--shape-cookie);
   border-color: rgba(0, 0, 0, .18);
-  animation: shape-breathe 11s ease-in-out infinite;
 }
-.login-orb-two { border-color: rgba(255, 255, 255, .34); animation-delay: -4s; }
+.login-orb-one { --float-y: -16px; --float-x: 10px; --float-dur: 11s; }
+.login-orb-two { border-color: rgba(255, 255, 255, .34); --float-y: 14px; --float-x: -12px; --float-dur: 13s; --float-delay: -5s; }
+.mock-card { --float-y: -7px; --float-dur: 7s; }
+.login-mascot-card { --float-y: -8px; --float-r: -.5deg; --float-dur: 7.5s; --float-delay: -2s; }
+.mock-chip-one { --float-y: -9px; --float-r: -2deg; --float-dur: 8s; --float-delay: -3s; }
+.mock-chip-two { --float-y: 8px; --float-r: 2deg; --float-dur: 9s; --float-delay: -6s; }
 .login-brand-lockup .brand-logo-full { width: 134px; }
 .login-brand-lockup .brand-product { border-left-color: rgba(0, 0, 0, .28); }
 .login-brand-lockup .brand-product small { color: rgba(0, 0, 0, .64); }
@@ -259,7 +262,13 @@
 .login-form { border-radius: var(--shape-panel-alt); }
 .form-heading h2 { font-family: var(--font-display); font-weight: 850; }
 .field input { border-radius: var(--shape-md); }
-.login-submit-md { --md-filled-button-container-shape: var(--shape-button); }
+.login-submit-md {
+  --md-filled-button-container-shape: 18px;
+  --md-filled-button-container-shape-start-start: 18px;
+  --md-filled-button-container-shape-start-end: 18px;
+  --md-filled-button-container-shape-end-end: 18px;
+  --md-filled-button-container-shape-end-start: 10px;
+}
 .login-submit-success { background: var(--brand-sky); color: #001a26; }
 
 @media (max-width: 920px) {

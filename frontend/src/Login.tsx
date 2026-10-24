@@ -94,18 +94,8 @@ export function Login() {
 
       <section className="login-hero-panel" aria-labelledby="brandTitle">
         <BrandPattern className="login-pattern" />
-        <motion.div
-          className="login-orb login-orb-one"
-          aria-hidden="true"
-          animate={{ y: [0, -16, 0], x: [0, 10, 0] }}
-          transition={{ repeat: Infinity, duration: 11, ease: "easeInOut" }}
-        />
-        <motion.div
-          className="login-orb login-orb-two"
-          aria-hidden="true"
-          animate={{ y: [0, 14, 0], x: [0, -12, 0] }}
-          transition={{ repeat: Infinity, duration: 13, ease: "easeInOut", delay: 1.2 }}
-        />
+        <div className="login-orb login-orb-one float-loop" aria-hidden="true" />
+        <div className="login-orb login-orb-two float-loop" aria-hidden="true" />
 
         <a className="brand-lockup login-brand-lockup" href="/login" aria-label="Aéza Контур">
           <span className="brand-logo-full">
@@ -162,11 +152,7 @@ export function Login() {
           animate={{ opacity: 1, y: 0, rotate: 0 }}
           transition={{ ...springEmphasized, delay: 0.42 }}
         >
-          <motion.div
-            className="mock-card"
-            animate={{ y: [0, -7, 0] }}
-            transition={{ repeat: Infinity, duration: 7, ease: "easeInOut" }}
-          >
+          <div className="mock-card float-loop">
             <div className="mock-card-head">
               <span className="mock-dot mock-dot-high" />
               <span className="mock-line mock-line-mid" />
@@ -184,30 +170,18 @@ export function Login() {
             </div>
             <span className="mock-line" />
             <span className="mock-line mock-line-short" />
-          </motion.div>
-          <motion.div
-            className="login-mascot-card"
-            animate={{ y: [0, -8, 0], rotate: [0, -0.5, 0] }}
-            transition={{ repeat: Infinity, duration: 7.5, ease: "easeInOut", delay: 0.4 }}
-          >
+          </div>
+          <div className="login-mascot-card float-loop">
             <BrandPattern />
             <MascotImage pose="business" />
             <span>Aéza-тян</span>
-          </motion.div>
-          <motion.span
-            className="mock-chip mock-chip-one"
-            animate={{ y: [0, -9, 0], rotate: [0, -2, 0] }}
-            transition={{ repeat: Infinity, duration: 8, ease: "easeInOut", delay: 0.6 }}
-          >
+          </div>
+          <span className="mock-chip mock-chip-one float-loop">
             Скорое окончание услуги
-          </motion.span>
-          <motion.span
-            className="mock-chip mock-chip-two"
-            animate={{ y: [0, 8, 0], rotate: [0, 2, 0] }}
-            transition={{ repeat: Infinity, duration: 9, ease: "easeInOut", delay: 1.4 }}
-          >
+          </span>
+          <span className="mock-chip mock-chip-two float-loop">
             Не хватает средств на продление
-          </motion.span>
+          </span>
         </motion.div>
 
         <motion.div

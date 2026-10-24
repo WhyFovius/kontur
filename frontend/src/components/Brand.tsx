@@ -84,7 +84,6 @@ export function MascotStage({
       transition={{ ...springEmphasized, delay: 0.12 }}
       aria-label={`${title}. ${text}`}
     >
-      <BrandPattern />
       <div className="mascot-stage-copy">
         <span className="eyebrow mascot-eyebrow">{eyebrow}</span>
         <strong>{title}</strong>
@@ -95,14 +94,13 @@ export function MascotStage({
           </md-filled-button>
         ) : null}
       </div>
-      <motion.div
-        className="mascot-stage-figure"
-        animate={{ y: [0, -6, 0], rotate: [0, -0.4, 0] }}
-        transition={{ duration: 6.5, repeat: Infinity, ease: "easeInOut" }}
-        aria-hidden="true"
-      >
+      {/* Portrait arch media frame: the expressive shape wraps the
+          mascot only, never the text. The idle float is a CSS
+          transform animation (compositor), not a JS rAF loop. */}
+      <div className="mascot-stage-figure" aria-hidden="true">
+        <BrandPattern className="mascot-stage-pattern" />
         <MascotImage pose={pose} />
-      </motion.div>
+      </div>
     </motion.aside>
   );
 }
