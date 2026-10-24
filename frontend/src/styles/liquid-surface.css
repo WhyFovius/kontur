@@ -1,0 +1,41 @@
+/* ==========================================================================
+   Liquid Surface — restrained pointer light for large glass planes.
+   A single radial highlight, composited on the GPU, written from a single
+   rAF callback. No React state changes while the pointer moves.
+   ========================================================================== */
+
+.liquid-surface {
+  position: relative;
+  isolation: isolate;
+  min-width: 0;
+}
+
+.liquid-surface__light {
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none;
+  border-radius: inherit;
+  opacity: var(--liquid-light-opacity, 0);
+  background: radial-gradient(
+    260px circle at var(--liquid-light-x, 50%) var(--liquid-light-y, 50%),
+    rgba(255, 255, 255, calc(0.2 * var(--liquid-light-strength, 1))),
+    transparent 70%
+  );
+  mix-blend-mode: soft-light;
+  transition: opacity 0.5s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.liquid-surface__content {
+  position: relative;
+  z-index: 1;
+  min-width: 0;
+}
+
+.liquid-surface[data-liquid-surface="off"] .liquid-surface__light {
+  display: none;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .liquid-surface__light { display: none; }
+}

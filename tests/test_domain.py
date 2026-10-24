@@ -1,6 +1,14 @@
 import unittest
+from datetime import timedelta
 
-from churnrisk.domain import analyze, payment_period
+from churnrisk.domain import (
+    alert_candidates,
+    analyze,
+    iso,
+    payment_period,
+    rescue_queue,
+    utcnow,
+)
 from churnrisk.storage import SnapshotValidationError, validate_snapshot
 
 
@@ -64,6 +72,53 @@ class DomainTests(unittest.TestCase):
             "transactions": [],
         }
         self.assertEqual(analyze(source, {})[0]["monthlyRevenue"], 73050)
+
+    def test_rescue_queue_and_alert_candidates_are_actionable(self):
+        now = utcnow()
+        source = {
+            "accounts": [
+                {
+                    "id": 77,
+                    "email": "rescue@example.org",
+                    "balance": 1000,
+                    "totalReplenished": 12000,
+                }
+            ],
+            "services": [
+                {
+                    "id": "svc-rescue",
+                    "accountId": 77,
+                    "name": "Critical VPS",
+                    "status": "active",
+                    "price": 9000,
+                    "paymentTerm": "month",
+                    "autoprolong": False,
+                    "expiresAt": iso(now + timedelta(days=2)),
+                }
+            ],
+            "transactions": [
+                {
+                    "id": "pay-rescue",
+                    "accountId": 77,
+                    "status": "not_performed",
+                    "type": "prolong",
+                    "amount": 9000,
+                }
+            ],
+        }
+        customers = analyze(source, {})
+        queue = rescue_queue(customers, now=now)
+        self.assertEqual(queue["totals"]["eligibleCustomers"], 1)
+        item = queue["items"][0]
+        self.assertEqual(item["actionType"], "top_up")
+        self.assertEqual(item["requiredTopUp"], 8000)
+        self.assertEqual(item["predictedScoreAfterAction"], 42)
+        self.assertGreaterEqual(item["priorityIndex"], 80)
+        self.assertLessEqual(item["rescueValue"], item["estimatedLoss"])
+
+        types = {candidate["type"] for candidate in alert_candidates(customers, now)}
+        self.assertIn("expiry_72h", types)
+        self.assertIn("insufficient_funds", types)
 
     def test_invalid_relationship_rejects_whole_snapshot(self):
         with self.assertRaises(SnapshotValidationError):

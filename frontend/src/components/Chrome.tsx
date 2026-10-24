@@ -4,6 +4,7 @@ import type { Theme, ThemeToggleOrigin } from "../theme";
 import { THEME_WAVE_DURATION_MS } from "../theme";
 import { EASE_EMPHASIZED, springSnappy, springEmphasized, springExEffects, springFollow } from "../motion";
 import { useDragSelect } from "./useDragSelect";
+import { GlassIconButton } from "./LiquidGlass";
 import { AezaLogo } from "./Brand";
 import {
   IconCheck,
@@ -46,19 +47,14 @@ export function ThemeToggle({
   };
 
   return (
-    <motion.button
-      type="button"
-      className={`theme-toggle-button ${className}`.trim()}
-      aria-pressed={isDark}
-      aria-label={
+    <GlassIconButton
+      label={
         isDark
           ? "Тёмная тема включена. Переключить на светлую тему"
           : "Светлая тема. Переключить на тёмную тему"
       }
-      title={isDark ? "Переключить на светлую тему" : "Переключить на тёмную тему"}
-      whileHover={{ y: -1 }}
-      whileTap={{ scale: 0.92 }}
-      transition={springSnappy}
+      className={`theme-toggle-button ${className}`.trim()}
+      aria-pressed={isDark}
       onClick={(event) => {
         const rect = event.currentTarget.getBoundingClientRect();
         onToggle({
@@ -93,7 +89,7 @@ export function ThemeToggle({
           <IconMoon />
         </motion.span>
       </span>
-    </motion.button>
+    </GlassIconButton>
   );
 }
 
