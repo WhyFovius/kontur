@@ -58,6 +58,14 @@ function smoothPath(p: Pt[], move = true): string {
   return d;
 }
 
+function expiryLabel(days: number | null | undefined): string {
+  if (days == null) return "без даты окончания";
+  if (days < 0) return `просрочено на ${Math.abs(days)} дн.`;
+  if (days === 0) return "заканчивается сегодня";
+  if (days === 1) return "заканчивается завтра";
+  return `ещё ${days} дн.`;
+}
+
 /**
  * Symmetric streamgraph fed with real data: revenue at risk per risk
  * level across service-expiry horizons, computed from the top-N customers
@@ -75,18 +83,23 @@ function smoothPath(p: Pt[], move = true): string {
 export function RiskStream({
   summary,
   customers,
+  onOpenCustomer,
 }: {
   summary: Summary;
   customers: Customer[];
+  onOpenCustomer?: (customerId: string, riskLevel: Customer["riskLevel"]) => void;
 }) {
   const [hoverT, setHoverT] = useState<number | null>(null);
+  const [pinnedIdx, setPinnedIdx] = useState<number | null>(null);
+  const scrubbingRef = useRef(false);
   const reduceMotion = useReducedMotion();
   const svgRef = useRef<SVGSVGElement | null>(null);
   const pendingHover = useRef<number | null>(null);
   const hoverFrame = useRef<number | null>(null);
 
-  const { matrix, totals, noDate, hasData, maxIdx } = useMemo(() => {
+  const { matrix, totals, bucketCustomers, noDate, hasData, maxIdx, priorityIdx } = useMemo(() => {
     const m: Record<Level, number>[] = BUCKETS.map(() => ({ high: 0, medium: 0, low: 0 }));
+    const grouped: Customer[][] = BUCKETS.map(() => []);
     let nd = 0;
     for (const c of customers) {
       if (c.score == null) continue;
@@ -97,16 +110,32 @@ export function RiskStream({
         continue;
       }
       const b = BUCKETS.findIndex((bucket) => bucket.test(c.daysToExpiry as number));
-      if (b >= 0) m[b][level] += Number(c.estimatedLoss) || 0;
+      if (b >= 0) {
+        m[b][level] += Number(c.estimatedLoss) || 0;
+        grouped[b].push(c);
+      }
     }
+    grouped.forEach((rows) =>
+      rows.sort(
+        (a, b) =>
+          (Number(b.estimatedLoss) || 0) - (Number(a.estimatedLoss) || 0) ||
+          (b.score ?? 0) - (a.score ?? 0),
+      ),
+    );
     const t = m.map((row) => row.high + row.medium + row.low);
     const maxT = Math.max(0, ...t);
+    const maxIndex = Math.max(0, t.indexOf(maxT));
+    const nearestWithLoss = grouped.findIndex(
+      (rows, index) => index <= 2 && rows.some((row) => (Number(row.estimatedLoss) || 0) > 0),
+    );
     return {
       matrix: m,
       totals: t,
+      bucketCustomers: grouped,
       noDate: nd,
       hasData: maxT > 0,
-      maxIdx: Math.max(0, t.indexOf(maxT)),
+      maxIdx: maxIndex,
+      priorityIdx: nearestWithLoss >= 0 ? nearestWithLoss : maxIndex,
     };
   }, [customers]);
 
@@ -152,20 +181,27 @@ export function RiskStream({
     mass: springFollow.mass,
   });
 
-  useEffect(() => {
-    if (hoverT === null) guideTarget.set(x(maxIdx));
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [guideTarget, hoverT, maxIdx]);
+  const selectedIdx = pinnedIdx ?? priorityIdx;
 
-  const updateHover = (event: React.PointerEvent<SVGSVGElement>) => {
+  useEffect(() => {
+    if (hoverT === null) guideTarget.set(x(selectedIdx));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [guideTarget, hoverT, selectedIdx]);
+
+  const pointerT = (event: React.PointerEvent<SVGSVGElement>): number | null => {
     const rect = event.currentTarget.getBoundingClientRect();
-    if (!rect.width) return;
+    if (!rect.width) return null;
     const svgX = ((event.clientX - rect.left) / rect.width) * W;
-    const t = clamp(
+    return clamp(
       ((svgX - PAD_X) / (W - PAD_X * 2)) * (BUCKETS.length - 1),
       0,
       BUCKETS.length - 1,
     );
+  };
+
+  const updateHover = (event: React.PointerEvent<SVGSVGElement>) => {
+    const t = pointerT(event);
+    if (t === null) return;
     pendingHover.current = t;
     if (hoverT === null) guideX.jump(x(t));
     guideTarget.set(x(t));
@@ -176,12 +212,35 @@ export function RiskStream({
     });
   };
 
+  const beginScrub = (event: React.PointerEvent<SVGSVGElement>) => {
+    scrubbingRef.current = true;
+    try {
+      event.currentTarget.setPointerCapture?.(event.pointerId);
+    } catch {
+      /* Capture is only an enhancement; pointermove still works. */
+    }
+    updateHover(event);
+  };
+
+  const finishScrub = (event: React.PointerEvent<SVGSVGElement>) => {
+    if (!scrubbingRef.current) return;
+    scrubbingRef.current = false;
+    const t = pointerT(event) ?? pendingHover.current;
+    if (t !== null) {
+      const pinned = clamp(Math.round(t), 0, BUCKETS.length - 1);
+      setPinnedIdx(pinned);
+      setHoverT(pinned);
+      guideTarget.set(x(pinned));
+    }
+  };
+
   const clearHover = () => {
+    if (scrubbingRef.current) return;
     pendingHover.current = null;
     setHoverT(null);
   };
 
-  const activeFloat = hoverT ?? maxIdx;
+  const activeFloat = hoverT ?? selectedIdx;
   const active = clamp(Math.round(activeFloat), 0, BUCKETS.length - 1);
   const lower = Math.floor(activeFloat);
   const upper = Math.min(BUCKETS.length - 1, lower + 1);
@@ -192,6 +251,8 @@ export function RiskStream({
   const activeValues = Object.fromEntries(
     LEVELS.map((l) => [l.key, interpolate(matrix.map((row) => row[l.key]))]),
   ) as Record<Level, number>;
+  const activeCustomers = bucketCustomers[active] ?? [];
+  const topCustomers = activeCustomers.slice(0, 3);
 
   return (
     <motion.article
@@ -232,6 +293,10 @@ export function RiskStream({
         </div>
       </div>
 
+      <p className="riskstream-hint">
+        Зажмите и ведите по потоку — отпустите, чтобы закрепить срок и увидеть его клиентов.
+      </p>
+
       {hasData ? (
         <>
           <svg
@@ -241,7 +306,13 @@ export function RiskStream({
             role="img"
             aria-label={`Поток выручки под риском: пик на участке «${BUCKETS[maxIdx].label}» — ${money(totals[maxIdx])}.`}
             onPointerEnter={updateHover}
+            onPointerDown={beginScrub}
             onPointerMove={updateHover}
+            onPointerUp={finishScrub}
+            onPointerCancel={() => {
+              scrubbingRef.current = false;
+              clearHover();
+            }}
             onPointerLeave={clearHover}
           >
             <g className="riskstream-flow">
@@ -257,7 +328,7 @@ export function RiskStream({
                 />
               ))}
             </g>
-            {hoverT !== null && (
+            {(hoverT !== null || pinnedIdx !== null) && (
               <motion.g pointerEvents="none" style={{ x: guideX }}>
                 <line
                   x1={0}
@@ -288,11 +359,67 @@ export function RiskStream({
             </span>
           </div>
 
-          <div className="riskstream-axis" aria-hidden="true">
+          <div className="riskstream-inspector">
+            <div className="riskstream-inspector-head">
+              <div>
+                <span>{pinnedIdx !== null ? "Закреплённый срок" : "Ближайший приоритет"}</span>
+                <strong>
+                  {BUCKETS[active].label} · {integer(activeCustomers.length)} клиентов · {money(totals[active])}
+                </strong>
+              </div>
+              {pinnedIdx !== null && (
+                <button type="button" onClick={() => setPinnedIdx(null)}>
+                  Сбросить закрепление
+                </button>
+              )}
+            </div>
+            {topCustomers.length > 0 ? (
+              <div className="riskstream-customer-list">
+                {topCustomers.map((customer) => (
+                  <button
+                    type="button"
+                    key={customer.id}
+                    onClick={() => onOpenCustomer?.(customer.id, customer.riskLevel)}
+                    disabled={!onOpenCustomer}
+                  >
+                    <span>
+                      <strong>{customer.email}</strong>
+                      <small>
+                        скор {integer(customer.score ?? 0)} · {expiryLabel(customer.daysToExpiry)}
+                      </small>
+                    </span>
+                    <b>{money(customer.estimatedLoss)}</b>
+                  </button>
+                ))}
+                {activeCustomers.length > topCustomers.length && (
+                  <span className="riskstream-more">
+                    + ещё {integer(activeCustomers.length - topCustomers.length)} в этом сроке
+                  </span>
+                )}
+              </div>
+            ) : (
+              <p>В этом сроке у загруженных клиентов нет денег под угрозой.</p>
+            )}
+          </div>
+
+          <div className="riskstream-axis" aria-label="Выбор срока окончания">
             {BUCKETS.map((bucket, i) => (
-              <span
+              <button
+                type="button"
                 key={bucket.id}
-                className={i === active ? "is-active" : undefined}
+                className={`${i === active ? "is-active" : ""}${i === pinnedIdx ? " is-pinned" : ""}`.trim()}
+                aria-pressed={i === pinnedIdx}
+                aria-label={`${bucket.label}: ${integer(bucketCustomers[i].length)} клиентов, ${money(totals[i])} под угрозой`}
+                onClick={() => {
+                  setPinnedIdx((current) => (current === i ? null : i));
+                  setHoverT(i);
+                  guideTarget.set(x(i));
+                }}
+                onFocus={() => {
+                  setHoverT(i);
+                  guideTarget.set(x(i));
+                }}
+                onBlur={() => setHoverT(null)}
                 style={{
                   left: `${(x(i) / W) * 100}%`,
                   transform:
@@ -304,7 +431,7 @@ export function RiskStream({
                 }}
               >
                 {bucket.label}
-              </span>
+              </button>
             ))}
           </div>
         </>

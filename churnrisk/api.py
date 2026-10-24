@@ -34,6 +34,7 @@ from .alerts import (
     list_notifications,
     mark_all_notifications_read,
     mark_notification_read,
+    mark_notification_unread,
     notification_counts,
     sync_alerts,
 )
@@ -663,12 +664,15 @@ async def analytics_rescue_queue(
 async def get_notifications(
     limit: int = Query(default=30, ge=1, le=100),
     unread_only: bool = False,
+    read_only: bool = False,
     _: str = Depends(current_user),
 ):
     # Touch the analysis first so a cold panel sees the monitor's current
     # episodes instead of an empty table until some other endpoint runs.
     _analyzed_data()
-    return list_notifications(limit=limit, unread_only=unread_only)
+    return list_notifications(
+        limit=limit, unread_only=unread_only, read_only=read_only
+    )
 
 
 @app.post(
@@ -688,6 +692,25 @@ async def read_notification(
     notification_id: int, _: str = Depends(current_user)
 ):
     notification = mark_notification_read(notification_id)
+    if notification is None:
+        raise HTTPException(status_code=404, detail="Уведомление не найдено")
+    unread, _critical = notification_counts()
+    return {
+        "ok": True,
+        "notification": notification,
+        "updatedCount": 1,
+        "unreadCount": unread,
+    }
+
+
+@app.post(
+    "/api/v1/notifications/{notification_id}/unread",
+    response_model=NotificationReadResponse,
+)
+async def unread_notification(
+    notification_id: int, _: str = Depends(current_user)
+):
+    notification = mark_notification_unread(notification_id)
     if notification is None:
         raise HTTPException(status_code=404, detail="Уведомление не найдено")
     unread, _critical = notification_counts()

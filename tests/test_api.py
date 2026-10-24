@@ -193,6 +193,21 @@ class ApiTests(unittest.TestCase):
         self.assertEqual(read.status_code, 200, read.text)
         self.assertTrue(read.json()["notification"]["isRead"])
 
+        read_folder = self.client.get(
+            "/api/v1/notifications?limit=20&read_only=true"
+        )
+        self.assertEqual(read_folder.status_code, 200, read_folder.text)
+        read_payload = read_folder.json()
+        self.assertEqual(read_payload["readCount"], 1)
+        self.assertEqual(
+            [item["id"] for item in read_payload["items"]], [first["id"]]
+        )
+        unread = self.client.post(
+            f"/api/v1/notifications/{first['id']}/unread"
+        )
+        self.assertEqual(unread.status_code, 200, unread.text)
+        self.assertFalse(unread.json()["notification"]["isRead"])
+
         with self.client.stream("GET", "/api/v1/events/stream") as stream:
             self.assertEqual(stream.status_code, 200)
             self.assertTrue(

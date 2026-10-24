@@ -120,6 +120,37 @@ class DomainTests(unittest.TestCase):
         self.assertIn("expiry_72h", types)
         self.assertIn("insufficient_funds", types)
 
+    def test_snapshot_accepts_export_boolean_spellings(self):
+        snapshot = {
+            "accounts": [
+                {"id": 1, "email": "active@example.org", "bonusState": "active"},
+                {"id": 2, "email": "off@example.org", "bonusState": "off"},
+                {"id": 3, "email": "numeric@example.org", "bonusStatus": 1},
+                {
+                    "id": 4,
+                    "email": "object@example.org",
+                    "bonusState": {"enabled": "yes"},
+                },
+            ],
+            "services": [
+                {
+                    "id": "s1",
+                    "accountId": 1,
+                    "status": "active",
+                    "price": 100,
+                    "paymentTerm": "month",
+                    "autoprolong": "on",
+                }
+            ],
+            "transactions": [],
+        }
+        normalized = validate_snapshot(snapshot)
+        self.assertEqual(
+            [row["bonusState"] for row in normalized["accounts"]],
+            [True, False, True, True],
+        )
+        self.assertIs(normalized["services"][0]["autoprolong"], True)
+
     def test_invalid_relationship_rejects_whole_snapshot(self):
         with self.assertRaises(SnapshotValidationError):
             validate_snapshot(

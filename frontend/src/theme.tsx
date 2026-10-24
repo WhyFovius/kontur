@@ -10,7 +10,7 @@ export interface ThemeToggleOrigin {
 
 /** The icon morph in Chrome is timed to the same wave so the two read as
  * one gesture rather than two unrelated animations. */
-export const THEME_WAVE_DURATION_MS = 720;
+export const THEME_WAVE_DURATION_MS = 980;
 
 interface LocalViewTransition {
   ready: Promise<void>;
@@ -80,15 +80,26 @@ export function useTheme() {
         void transition.ready
           .then(() => {
             root.animate(
-              {
-                clipPath: [
-                  `circle(0px at ${origin.x}px ${origin.y}px)`,
-                  `circle(${radius}px at ${origin.x}px ${origin.y}px)`,
-                ],
-              },
+              [
+                {
+                  clipPath: `circle(0px at ${origin.x}px ${origin.y}px)`,
+                  opacity: 0.35,
+                  offset: 0,
+                },
+                {
+                  clipPath: `circle(${radius * 0.58}px at ${origin.x}px ${origin.y}px)`,
+                  opacity: 0.88,
+                  offset: 0.62,
+                },
+                {
+                  clipPath: `circle(${radius}px at ${origin.x}px ${origin.y}px)`,
+                  opacity: 1,
+                  offset: 1,
+                },
+              ],
               {
                 duration: THEME_WAVE_DURATION_MS,
-                easing: "cubic-bezier(0.2, 0, 0, 1)",
+                easing: "cubic-bezier(0.22, 0.78, 0.24, 1)",
                 pseudoElement: "::view-transition-new(root)",
               } as KeyframeAnimationOptions,
             );

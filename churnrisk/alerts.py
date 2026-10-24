@@ -355,12 +355,19 @@ def sync_alerts(
 
 
 def list_notifications(
-    limit: int = 30, unread_only: bool = False
+    limit: int = 30, unread_only: bool = False, read_only: bool = False
 ) -> dict[str, Any]:
     bounded_limit = max(1, min(limit, 100))
     with db() as connection:
         ensure_alert_tables(connection)
-        where = "WHERE read_at IS NULL" if unread_only else ""
+        if unread_only and read_only:
+            where = "WHERE 1=0"
+        elif unread_only:
+            where = "WHERE read_at IS NULL"
+        elif read_only:
+            where = "WHERE read_at IS NOT NULL"
+        else:
+            where = ""
         rows = connection.execute(
             f"SELECT * FROM risk_events {where} "
             "ORDER BY first_seen_at DESC, id DESC LIMIT ?",
@@ -376,6 +383,11 @@ def list_notifications(
                 "SELECT COUNT(*) FROM risk_events WHERE read_at IS NULL"
             ).fetchone()[0]
         )
+        read = int(
+            connection.execute(
+                "SELECT COUNT(*) FROM risk_events WHERE read_at IS NOT NULL"
+            ).fetchone()[0]
+        )
         critical = int(
             connection.execute(
                 "SELECT COUNT(*) FROM risk_events "
@@ -386,6 +398,7 @@ def list_notifications(
         "items": [_serialize(row) for row in rows],
         "total": total,
         "unreadCount": unread,
+        "readCount": read,
         "criticalCount": critical,
         "generatedAt": iso(utcnow()),
     }
@@ -414,6 +427,21 @@ def mark_notification_read(notification_id: int) -> dict[str, Any] | None:
         cursor = connection.execute(
             "UPDATE risk_events SET read_at=COALESCE(read_at, ?) WHERE id=?",
             (iso(utcnow()), notification_id),
+        )
+        if cursor.rowcount == 0:
+            return None
+        row = connection.execute(
+            "SELECT * FROM risk_events WHERE id=?", (notification_id,)
+        ).fetchone()
+    return _serialize(row) if row else None
+
+
+def mark_notification_unread(notification_id: int) -> dict[str, Any] | None:
+    with db() as connection:
+        ensure_alert_tables(connection)
+        cursor = connection.execute(
+            "UPDATE risk_events SET read_at=NULL WHERE id=?",
+            (notification_id,),
         )
         if cursor.rowcount == 0:
             return None

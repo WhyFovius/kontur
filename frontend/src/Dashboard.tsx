@@ -3,7 +3,6 @@ import { AnimatePresence, motion } from "framer-motion";
 import type {
   Customer,
   CustomerList as CustomerListData,
-  ChurnTimelineData,
   ModelSettings,
   RescueQueueData,
   RiskLevel,
@@ -18,7 +17,6 @@ import { useTheme } from "./theme";
 import { fadeRise, pageVariants, springEmphasized, springSnappy } from "./motion";
 import { CustomerList, type SavedView } from "./components/CustomerList";
 import { RiskDonut } from "./components/RiskDonut";
-import { ChurnTimeline } from "./components/ChurnTimeline";
 const RealtimeAlerts = lazy(() =>
   import("./components/RealtimeAlerts").then((m) => ({ default: m.RealtimeAlerts })),
 );
@@ -54,8 +52,8 @@ import {
   type ToastState,
   type UploadPhase,
 } from "./components/Chrome";
-import { IconArrowRight, IconArrowUpRight, IconChevron, IconUpload } from "./icons";
-import { MascotImage, MascotStage, ShapeLoader } from "./components/Brand";
+import { IconArrowRight, IconArrowUpRight, IconUpload } from "./icons";
+import { MascotStage, MascotTip, ShapeLoader } from "./components/Brand";
 
 const PAGE_SIZE = 50;
 const PAGE_ORDER: SectionId[] = ["overview", "customers", "model", "live"];
@@ -124,112 +122,6 @@ function pageFromHash(): SectionId {
   return (PAGE_ORDER as string[]).includes(raw) ? (raw as SectionId) : "overview";
 }
 
-/* ---------------- Overview: today's retention queue ---------------- */
-
-function TodayQueue({
-  items,
-  total,
-  loading,
-  onOpen,
-  onShowAll,
-}: {
-  items: Customer[];
-  total: number;
-  loading: boolean;
-  onOpen: (id: string) => void;
-  onShowAll: () => void;
-}) {
-  return (
-    <motion.section
-      className="panel queue-panel"
-      variants={fadeRise}
-      custom={0.16}
-      initial="hidden"
-      animate="show"
-      aria-label="Очередь на сегодня"
-    >
-      <div className="panel-heading queue-heading">
-        <div className="section-heading-copy">
-          <span className="eyebrow">Сначала — эти клиенты</span>
-          <h2>Очередь на сегодня</h2>
-          <p>Высокий риск по убыванию score. Клик откроет карточку на странице «Клиенты».</p>
-        </div>
-        <md-filled-tonal-button trailingIcon onClick={onShowAll}>
-          Все с высоким риском{total ? ` · ${integer(total)}` : ""}
-          <span slot="icon" className="md-icon-wrap">
-            <IconArrowRight />
-          </span>
-        </md-filled-tonal-button>
-      </div>
-
-      {loading && items.length === 0 ? (
-        <div className="queue-skeletons" aria-hidden="true">
-          {[0, 1, 2].map((index) => (
-            <div key={index} className="row-skeleton">
-              <span className="skeleton skeleton-avatar" />
-              <span className="skeleton skeleton-line skeleton-line-wide" />
-              <span className="skeleton skeleton-pill" />
-            </div>
-          ))}
-        </div>
-      ) : items.length === 0 ? (
-        <div className="table-state queue-empty queue-empty-mascot">
-          <span className="queue-mascot" aria-hidden="true">
-            <MascotImage pose="calm" />
-          </span>
-          <span className="queue-empty-copy">
-            <strong>Клиентов с высоким риском сейчас нет</strong>
-            <span>Очередь пуста — можно заняться плановыми контактами среднего риска.</span>
-          </span>
-        </div>
-      ) : (
-        <div className="queue-list" role="list">
-          {items.map((customer, index) => (
-            <motion.button
-              key={customer.id}
-              type="button"
-              role="listitem"
-              className="queue-row"
-              onClick={() => onOpen(customer.id)}
-              initial={{ opacity: 0, y: 14 }}
-              animate={{ opacity: 1, y: 0 }}
-              transition={{ ...springEmphasized, delay: 0.05 * index }}
-              whileHover={{ y: -2 }}
-              whileTap={{ scale: 0.99 }}
-              aria-label={`Открыть клиента ${customer.email} на странице клиентов`}
-            >
-              <span className="queue-rank" aria-hidden="true">
-                {index + 1}
-              </span>
-              <span className="client-avatar client-avatar-high" aria-hidden="true">
-                {(customer.email?.trim()?.[0] || "?").toUpperCase()}
-              </span>
-              <span className="queue-copy">
-                <span className="client-email" title={customer.email}>
-                  {customer.email}
-                </span>
-                <span className="queue-reason">
-                  {customer.reasons?.[0] || "Высокий риск по совокупности сигналов"}
-                </span>
-              </span>
-              <span className="queue-side">
-                <strong>{money(customer.estimatedLoss)}</strong>
-                <span>под риском · 90 дней</span>
-              </span>
-              <span className="risk-pill risk-pill-high">
-                {`${RISK_LABELS.high} · ${customer.score ?? "—"}`}
-              </span>
-              <span className="queue-chevron" aria-hidden="true">
-                <IconChevron />
-              </span>
-            </motion.button>
-          ))}
-        </div>
-      )}
-    </motion.section>
-  );
-}
-
 /* ---------------- Model page: live effect strip ---------------- */
 
 function ModelImpact({ summary }: { summary: Summary }) {
@@ -294,10 +186,9 @@ export function Dashboard() {
 
   const [username, setUsername] = useState("Аналитик");
   const [summary, setSummary] = useState<Summary | null>(null);
-  const [churnTimeline, setChurnTimeline] = useState<ChurnTimelineData | null>(null);
   const [rescueQueue, setRescueQueue] = useState<RescueQueueData | null>(null);
   const [customers, setCustomers] = useState<CustomerListData>({ items: [], total: 0 });
-  const [topQueue, setTopQueue] = useState<CustomerListData>({ items: [], total: 0 });
+  const [overviewRisk, setOverviewRisk] = useState<RiskLevel | "">("");
   const [settings, setSettings] = useState<ModelSettings | null>(null);
   const [sort, setSort] = useState<SortKey>("score");
   const [order, setOrder] = useState<SortOrder>("desc");
@@ -442,13 +333,6 @@ export function Dashboard() {
           offset: String(effective.offset),
         });
         if (effective.risk) params.set("risk", effective.risk);
-        const queueParams = new URLSearchParams({
-          risk: "high",
-          sort: "score",
-          order: "desc",
-          limit: "5",
-          offset: "0",
-        });
         // Top-100 by score powers the 3D landscape, the what-if simulator
         // and the data-quality details. All subset-based widgets say so.
         const landscapeParams = new URLSearchParams({
@@ -459,22 +343,18 @@ export function Dashboard() {
         });
         const requests: [
           Promise<Summary>,
-          Promise<ChurnTimelineData>,
           Promise<RescueQueueData>,
-          Promise<CustomerListData>,
           Promise<CustomerListData>,
           Promise<CustomerListData>,
           Promise<ModelSettings | null>,
         ] = [
           api<Summary>("/api/v1/analytics/summary"),
-          api<ChurnTimelineData>("/api/v1/analytics/churn-timeline"),
           api<RescueQueueData>("/api/v1/analytics/rescue-queue?limit=8&minimum_score=65"),
           api<CustomerListData>(`/api/v1/customers?${params}`),
-          api<CustomerListData>(`/api/v1/customers?${queueParams}`),
           api<CustomerListData>(`/api/v1/customers?${landscapeParams}`),
           includeSettings ? api<ModelSettings>("/api/v1/model/settings") : Promise.resolve(null),
         ];
-        const [summaryData, timelineData, rescueData, firstPage, queueData, landscapeData, freshSettings] =
+        const [summaryData, rescueData, firstPage, landscapeData, freshSettings] =
           await Promise.all(requests);
         let customerData = firstPage;
         let nextOffset = effective.offset;
@@ -488,7 +368,7 @@ export function Dashboard() {
         }
 
         // Avoid pointless re-renders (and re-animations) on identical polls.
-        const signature = JSON.stringify([summaryData, timelineData, customerData, queueData, landscapeData, freshSettings]);
+        const signature = JSON.stringify([summaryData, rescueData, customerData, landscapeData, freshSettings]);
         if (signature !== signatureRef.current) {
           signatureRef.current = signature;
           const previous = summaryRef.current;
@@ -504,10 +384,8 @@ export function Dashboard() {
           }
           summaryRef.current = summaryData;
           setSummary(summaryData);
-          setChurnTimeline(timelineData);
           setRescueQueue(rescueData);
           setCustomers(customerData);
-          setTopQueue(queueData);
           setLandscapeCustomers(landscapeData.items);
           // Record a history point only when the portfolio really moved.
           const point: HistoryPoint = {
@@ -727,31 +605,18 @@ export function Dashboard() {
     goToPage("customers");
   }, [handleRiskChange, goToPage]);
 
-  // Donut on the overview navigates into the filtered work queue.
-  const handleOverviewRiskSelect = useCallback(
-    (next: RiskLevel | "") => {
-      handleRiskChange(next);
-      if (next) goToPage("customers");
-    },
-    [handleRiskChange, goToPage],
-  );
+  // Donut selection is inspection, not navigation: it changes the centre
+  // and the selected segment on this page only. Moving to the work queue
+  // is a separate explicit action below the chart.
+  const handleOverviewRiskSelect = useCallback((next: RiskLevel | "") => {
+    setOverviewRisk(next);
+  }, []);
 
-  const openFromQueue = useCallback(
-    (id: string) => {
-      setSort("score");
-      setOrder("desc");
-      setRisk("high");
-      setOffset(0);
-      setDirection(1);
-      setExpandedId(id);
-      goToPage("customers");
-      reloadWith(
-        { sort: "score", order: "desc", risk: "high", offset: 0 },
-        "Не удалось открыть клиента",
-      );
-    },
-    [goToPage, reloadWith],
-  );
+  const openOverviewRiskSegment = useCallback(() => {
+    if (!overviewRisk) return;
+    handleRiskChange(overviewRisk);
+    goToPage("customers");
+  }, [goToPage, handleRiskChange, overviewRisk]);
 
   // Deep-open used by the 3D landscape and the what-if movers list.
   const openCustomer = useCallback(
@@ -937,9 +802,25 @@ export function Dashboard() {
     </footer>
   );
 
+  const topRescue = rescueQueue?.items[0] ?? null;
+  const overviewRiskCount =
+    !summary || !overviewRisk
+      ? 0
+      : overviewRisk === "high"
+        ? summary.highRisk
+        : overviewRisk === "medium"
+          ? summary.mediumRisk
+          : overviewRisk === "low"
+            ? summary.lowRisk
+            : summary.unratedCount;
+  const overviewRiskShare =
+    summary && summary.customerCount > 0
+      ? Math.round((overviewRiskCount / summary.customerCount) * 100)
+      : 0;
+
   const overviewPage = (
     <>
-      <section className="page-heading">
+      <section className="page-heading overview-heading">
         <div className="page-heading-copy">
           <span className="eyebrow">
             <span className="eyebrow-line" aria-hidden="true" />
@@ -963,12 +844,6 @@ export function Dashboard() {
             <md-filled-tonal-button onClick={() => goToPage("model")}>
               What-if: покрутить веса
             </md-filled-tonal-button>
-            {summary && (
-              <span className="hero-loss-chip">
-                Под угрозой на 90 дней:{" "}
-                <AnimatedNumber value={summary.estimatedLoss} format={moneyFormat} />
-              </span>
-            )}
           </div>
         </div>
         <div className="heading-side">
@@ -979,23 +854,33 @@ export function Dashboard() {
             </a>
           </div>
           <MascotStage
-            eyebrow="Aéza-тян · ассистент"
+            eyebrow="Aéza-тян · первый шаг"
             title={
-              summary
-                ? summary.highRisk > 0
-                  ? `${integer(summary.highRisk)} ${customerWord(summary.highRisk)} ждут контакта`
-                  : "Срочных рисков сейчас нет"
-                : "Собираю свежий снимок"
+              topRescue
+                ? `Сначала: ${topRescue.email}`
+                : summary
+                  ? summary.highRisk > 0
+                    ? `${integer(summary.highRisk)} ${customerWord(summary.highRisk)} ждут контакта`
+                    : "Срочных рисков сейчас нет"
+                  : "Собираю свежий снимок"
             }
             text={
-              summary
-                ? summary.highRisk > 0
-                  ? "Начну с высокого риска: там самая дорогая выручка и понятные причины."
-                  : "Можно спокойно проверить средний сегмент и плановые продления."
-                : "Проверяю клиентов, услуги и сигналы модели."
+              topRescue
+                ? `${topRescue.actionLabel}: ${topRescue.actionDetail} На кону ${moneyFormat(topRescue.rescueValue)}.`
+                : summary
+                  ? summary.highRisk > 0
+                    ? "Начну с высокого риска: там самая дорогая выручка и понятные причины."
+                    : "Можно спокойно проверить средний сегмент и плановые продления."
+                  : "Проверяю клиентов, услуги и сигналы модели."
             }
-            actionLabel={summary && summary.highRisk > 0 ? "Открыть очередь" : undefined}
-            onAction={summary && summary.highRisk > 0 ? showHighRisk : undefined}
+            actionLabel={topRescue ? "Открыть этого клиента" : summary && summary.highRisk > 0 ? "Открыть очередь" : undefined}
+            onAction={
+              topRescue
+                ? () => openCustomer(topRescue.customerId, topRescue.riskLevel)
+                : summary && summary.highRisk > 0
+                  ? showHighRisk
+                  : undefined
+            }
           />
         </div>
       </section>
@@ -1006,16 +891,17 @@ export function Dashboard() {
         <KpiSkeletons />
       )}
 
-      <Suspense fallback={<PanelSkeleton />}>
-        <RescueQueue data={rescueQueue} onOpenCustomer={openCustomer} />
-      </Suspense>
-
-      <Suspense fallback={<PanelSkeleton />}>
-        <RiskBars
-          customers={landscapeCustomers}
-          onOpen={(customer) => openCustomer(customer.id, customer.riskLevel)}
-        />
-      </Suspense>
+      <section className="overview-workgrid" aria-label="Действия и распределение скора">
+        <Suspense fallback={<PanelSkeleton />}>
+          <RescueQueue data={rescueQueue} onOpenCustomer={openCustomer} />
+        </Suspense>
+        <Suspense fallback={<PanelSkeleton />}>
+          <RiskBars
+            customers={landscapeCustomers}
+            onOpen={(customer) => openCustomer(customer.id, customer.riskLevel)}
+          />
+        </Suspense>
+      </section>
 
       <section className="overview-analytics" aria-label="Сводная аналитика">
         <motion.article
@@ -1033,19 +919,28 @@ export function Dashboard() {
             <span className="panel-meta">Сейчас</span>
           </div>
           {summary ? (
-            <RiskDonut summary={summary} activeRisk={risk} onSelectRisk={handleOverviewRiskSelect} />
+            <RiskDonut summary={summary} activeRisk={overviewRisk} onSelectRisk={handleOverviewRiskSelect} />
           ) : (
             <div className="donut-skeleton skeleton" aria-hidden="true" />
           )}
           <p className="panel-hint">
-            Зажмите и ведите по легенде, отпустите на сегменте — откроется отфильтрованная
-            очередь клиентов.
+            Зажмите и ведите по сегменту или легенде — выбор поменяется прямо здесь, без перехода.
           </p>
+          {overviewRisk && (
+            <button type="button" className="donut-open-segment" onClick={openOverviewRiskSegment}>
+              Открыть «{RISK_LABELS[overviewRisk]}» в Клиентах
+              <IconArrowRight />
+            </button>
+          )}
         </motion.article>
 
         {summary ? (
           <Suspense fallback={<PanelSkeleton />}>
-            <RiskStream summary={summary} customers={landscapeCustomers} />
+            <RiskStream
+              summary={summary}
+              customers={landscapeCustomers}
+              onOpenCustomer={(customerId, riskLevel) => openCustomer(customerId, riskLevel)}
+            />
           </Suspense>
         ) : (
           <motion.article
@@ -1061,27 +956,56 @@ export function Dashboard() {
         )}
       </section>
 
-      <ChurnTimeline data={churnTimeline} />
-
       {summary && (
-        <section className="overview-insights" aria-label="Сценарии, динамика и качество данных">
-          <RevenueCalculator lossHigh={levelLosses.high} lossMedium={levelLosses.medium} />
-          <ScoreHistory points={historyPoints} />
-          <DataQuality
-            summary={summary}
-            customers={landscapeCustomers}
-            onShowUnrated={showUnrated}
-          />
+        <section className="overview-support-grid" aria-label="Сегмент, сценарии и качество данных">
+          <section className="overview-insights" aria-label="Сценарии, динамика и качество данных">
+            <RevenueCalculator lossHigh={levelLosses.high} lossMedium={levelLosses.medium} />
+            <ScoreHistory points={historyPoints} />
+            <DataQuality
+              summary={summary}
+              customers={landscapeCustomers}
+              onShowUnrated={showUnrated}
+            />
+          </section>
+          <motion.article
+            className="panel overview-segment-summary"
+            variants={fadeRise}
+            custom={0.18}
+            initial="hidden"
+            animate="show"
+            aria-label="Выбранный сегмент риска"
+          >
+            <div className="panel-heading">
+              <div>
+                <span className="eyebrow">На этом экране</span>
+                <h2>{overviewRisk ? RISK_LABELS[overviewRisk] : "Весь портфель"}</h2>
+              </div>
+              <span className="panel-meta">выбор доната</span>
+            </div>
+            <strong className="overview-segment-value">
+              {integer(overviewRisk ? overviewRiskCount : summary.customerCount)}
+            </strong>
+            <span className="overview-segment-caption">
+              {overviewRisk
+                ? `${integer(overviewRiskShare)}% всех клиентов в выбранном сегменте`
+                : "клиентов в текущем снимке"}
+            </span>
+            <dl className="overview-segment-list">
+              <div><dt>Высокий</dt><dd>{integer(summary.highRisk)}</dd></div>
+              <div><dt>Средний</dt><dd>{integer(summary.mediumRisk)}</dd></div>
+              <div><dt>Низкий</dt><dd>{integer(summary.lowRisk)}</dd></div>
+              <div><dt>Нет оценки</dt><dd>{integer(summary.unratedCount)}</dd></div>
+            </dl>
+            {overviewRisk ? (
+              <button type="button" className="donut-open-segment" onClick={openOverviewRiskSegment}>
+                Открыть сегмент в Клиентах <IconArrowRight />
+              </button>
+            ) : (
+              <p className="panel-hint">Выберите сегмент на донате — страница не поменяется.</p>
+            )}
+          </motion.article>
         </section>
       )}
-
-      <TodayQueue
-        items={topQueue.items}
-        total={topQueue.total}
-        loading={initialLoading}
-        onOpen={openFromQueue}
-        onShowAll={showHighRisk}
-      />
       {pageFooter}
     </>
   );
@@ -1106,6 +1030,23 @@ export function Dashboard() {
           </span>
         </div>
       </section>
+
+      <MascotTip
+        storageKey="customers-selection-v1"
+        title={customers.items[0] ? "Начнём с первой строки" : "В этой выборке пока пусто"}
+        actionLabel={customers.items[0] ? "Развернуть первую строку" : undefined}
+        onAction={customers.items[0] ? () => setExpandedId(customers.items[0].id) : undefined}
+      >
+        {customers.items[0] ? (
+          <p>
+            В выборке {integer(customers.total)} {customerWord(customers.total)}. Первая строка — {customers.items[0].email}
+            {customers.items[0].score != null ? `, скор ${integer(customers.items[0].score)}` : ""}; внутри карточки видны причины,
+            услуги и расчёт денег.
+          </p>
+        ) : (
+          <p>Смягчите фильтр риска или загрузите снимок — как только появятся клиенты, я покажу, с кого начать.</p>
+        )}
+      </MascotTip>
 
       <motion.section
         className="panel table-panel"
@@ -1194,6 +1135,22 @@ export function Dashboard() {
       </section>
 
       {summary ? <ModelImpact summary={summary} /> : <KpiSkeletons />}
+
+      <MascotTip
+        storageKey="model-weights-v1"
+        title={weightsDirty ? "Сначала посмотрите, кто переедет" : "Я берегу сохранённую модель"}
+        actionLabel={weightsDirty ? "Сбросить сценарий" : undefined}
+        onAction={weightsDirty ? resetDraft : undefined}
+      >
+        {weightsDirty && simulation ? (
+          <p>
+            В локальном сценарии уровень меняют {integer(simulation.movers.length)} из {integer(landscapeCustomers.length)}
+            загруженных клиентов. Ничего не применится, пока вы явно не нажмёте сохранение в карточке сценария.
+          </p>
+        ) : (
+          <p>Двигайте по одному весу: так проще понять, какой сигнал реально меняет очередь, а какой только шумит.</p>
+        )}
+      </MascotTip>
 
       <div className={`model-grid${settings && simulation ? "" : " model-grid-solo"}`}>
       <motion.section
