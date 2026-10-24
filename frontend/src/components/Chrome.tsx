@@ -1,10 +1,11 @@
-import type { RefObject } from "react";
+import { useEffect, useState, type RefObject } from "react";
 import { AnimatePresence, motion } from "framer-motion";
 import type { Theme } from "../theme";
 import { springSnappy, springEmphasized, springFollow } from "../motion";
 import { useDragSelect } from "./useDragSelect";
 import {
   IconCheck,
+  IconChevron,
   IconClose,
   IconGrid,
   IconLogout,
@@ -72,6 +73,8 @@ interface SidebarProps {
   username: string;
   connectionError: boolean;
   onLogout: () => void;
+  collapsed: boolean;
+  onToggleSidebar: () => void;
 }
 
 export function Sidebar({
@@ -81,6 +84,8 @@ export function Sidebar({
   username,
   connectionError,
   onLogout,
+  collapsed,
+  onToggleSidebar,
 }: SidebarProps) {
   const drag = useDragSelect<SectionId>({
     values: NAV_IDS,
@@ -148,6 +153,7 @@ export function Sidebar({
               href={`#${item.id}`}
               draggable={false}
               aria-current={activeSection === item.id ? "page" : undefined}
+              title={collapsed ? item.label : undefined}
               onClick={(event) => drag.handleItemClick(item.id, event)}
             >
               <span className="nav-icon" aria-hidden="true">
@@ -161,6 +167,27 @@ export function Sidebar({
       </nav>
 
       <div className="sidebar-bottom">
+        <motion.button
+          type="button"
+          className="sidebar-toggle"
+          onClick={onToggleSidebar}
+          aria-expanded={!collapsed}
+          aria-label={collapsed ? "Развернуть панель навигации" : "Свернуть панель навигации"}
+          title={collapsed ? "Развернуть панель навигации" : "Свернуть панель навигации"}
+          whileTap={{ scale: 0.94 }}
+          transition={springSnappy}
+        >
+          <motion.span
+            className="sidebar-toggle-icon"
+            initial={false}
+            animate={{ rotate: collapsed ? -90 : 90 }}
+            transition={springSnappy}
+            aria-hidden="true"
+          >
+            <IconChevron />
+          </motion.span>
+          <span className="sidebar-toggle-label">{collapsed ? "Развернуть" : "Свернуть"}</span>
+        </motion.button>
         <div className="sidebar-note">
           <span
             className={`note-signal${connectionError ? " is-error" : ""}`}
@@ -260,12 +287,39 @@ export function MobileNav({
 
 /* ---------------- Top app bar ---------------- */
 
+function UpdatedAgo({ at }: { at: number | null }) {
+  const [, setTick] = useState(0);
+  useEffect(() => {
+    if (!at) return undefined;
+    const id = window.setInterval(() => setTick((t) => t + 1), 1000);
+    return () => window.clearInterval(id);
+  }, [at]);
+  if (!at) return <span className="updated-time">только что</span>;
+  const sec = Math.max(0, Math.round((Date.now() - at) / 1000));
+  const label =
+    sec < 5
+      ? "только что"
+      : sec < 60
+        ? `${sec} с назад`
+        : sec < 3600
+          ? `${Math.floor(sec / 60)} мин назад`
+          : new Date(at).toLocaleTimeString("ru-RU", { hour: "2-digit", minute: "2-digit" });
+  return (
+    <span
+      className="updated-time"
+      title={`Обновлено в ${new Date(at).toLocaleTimeString("ru-RU")}`}
+    >
+      {label}
+    </span>
+  );
+}
+
 interface TopbarProps {
   sectionLabel: string;
   theme: Theme;
   onToggleTheme: () => void;
   connectionError: boolean;
-  lastUpdated: string;
+  lastUpdatedAt: number | null;
   uploadPhase: UploadPhase;
   onUploadClick: () => void;
   fileInputRef: RefObject<HTMLInputElement | null>;
@@ -278,7 +332,7 @@ export function Topbar({
   theme,
   onToggleTheme,
   connectionError,
-  lastUpdated,
+  lastUpdatedAt,
   uploadPhase,
   onUploadClick,
   fileInputRef,
@@ -310,10 +364,16 @@ export function Topbar({
           className={`live-indicator${connectionError ? " is-error" : ""}`}
           role="status"
         >
-          <i aria-hidden="true" />
+          <motion.i
+            key={lastUpdatedAt ?? "init"}
+            initial={{ scale: 1.6 }}
+            animate={{ scale: 1 }}
+            transition={springSnappy}
+            aria-hidden="true"
+          />
           <span>{connectionError ? "Нет связи с сервером" : "Синхронизация активна"}</span>
         </span>
-        <span className="updated-time">{lastUpdated}</span>
+        <UpdatedAgo at={lastUpdatedAt} />
         <ThemeToggle theme={theme} onToggle={onToggleTheme} />
         <md-filled-button
           class={`upload-button upload-${uploadPhase}`}

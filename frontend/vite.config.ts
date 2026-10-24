@@ -17,6 +17,16 @@ export default defineConfig({
     modulePreload: false,
     sourcemap: false,
     chunkSizeWarningLimit: 600,
+    rollupOptions: {
+      output: {
+        manualChunks(id: string) {
+          if (/node_modules\/(@material\/web|lit|lit-html|lit-element|@lit|@lit-labs|tslib)\//.test(id))
+            return "material";
+          if (id.includes("node_modules")) return "vendor";
+          return undefined;
+        },
+      },
+    },
   },
   server: {
     host: "0.0.0.0",
