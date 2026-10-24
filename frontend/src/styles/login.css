@@ -1,5 +1,7 @@
 /* ==========================================================================
    Kontur login — commercial split hero, M3 Expressive.
+   The Liquid Glass overrides in liquid-glass-overrides.css replace the
+   legacy surfaces; this file keeps the structural composition only.
    ========================================================================== */
 
 .login-shell {
