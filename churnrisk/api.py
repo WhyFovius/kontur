@@ -288,13 +288,28 @@ def _analyzed_data() -> tuple[list[dict[str, Any]], dict[str, Any]]:
     return customers, aggregate
 
 
+def _frontend_response(legacy_path) -> FileResponse:
+    """Serve the React (Framer Motion) bundle when it has been built.
+
+    The bundle is emitted to ``static/app`` by ``npm run build`` in
+    ``frontend/`` and committed for the Python-only Docker image.
+    When it is absent (fresh checkout without a Node toolchain) the
+    legacy vanilla pages are served unchanged, so the product and the
+    API test-suite keep working without a frontend build.
+    """
+    built_index = STATIC_DIR / "app" / "index.html"
+    if built_index.is_file():
+        return FileResponse(built_index)
+    return FileResponse(legacy_path)
+
+
 @app.get("/", include_in_schema=False)
 async def index(request: Request):
     try:
         await _username_for_token(request.cookies.get("churn_session"))
     except HTTPException:
         return RedirectResponse("/login", status_code=303)
-    return FileResponse(TEMPLATES_DIR / "index.html")
+    return _frontend_response(TEMPLATES_DIR / "index.html")
 
 
 @app.get("/login", include_in_schema=False)
@@ -302,7 +317,7 @@ async def login_page(request: Request):
     try:
         await _username_for_token(request.cookies.get("churn_session"))
     except HTTPException:
-        return FileResponse(STATIC_DIR / "login.html")
+        return _frontend_response(STATIC_DIR / "login.html")
     return RedirectResponse("/", status_code=303)
 
 

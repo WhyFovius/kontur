@@ -14,6 +14,10 @@ data/*.db
 data/*.db-shm
 data/*.db-wal
 
+# Frontend toolchain (the built bundle in static/app IS committed on purpose:
+# the Python-only Docker image serves it without a Node build stage)
+frontend/node_modules/
+
 # Local task instructions (keep out of the public repository)
 /skill.md
 /SKILL (2).md

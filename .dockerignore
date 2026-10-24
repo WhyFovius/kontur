@@ -12,6 +12,7 @@ __pycache__/
 .venv/
 venv/
 tests/
+frontend/
 README.md
 Задача*.md
 skill*.md

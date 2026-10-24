@@ -1,0 +1,215 @@
+@font-face {
+  font-family: "Manrope";
+  font-style: normal;
+  font-weight: 400 800;
+  font-display: swap;
+  src: url("/static/fonts/Manrope-Cyrillic-ext.woff2") format("woff2");
+  unicode-range: U+0460-052F, U+1C80-1C8A, U+20B4, U+2DE0-2DFF, U+A640-A69F, U+FE2E-FE2F;
+}
+@font-face {
+  font-family: "Manrope";
+  font-style: normal;
+  font-weight: 400 800;
+  font-display: swap;
+  src: url("/static/fonts/Manrope-Cyrillic.woff2") format("woff2");
+  unicode-range: U+0301, U+0400-045F, U+0490-0491, U+04B0-04B1, U+2116;
+}
+@font-face {
+  font-family: "Manrope";
+  font-style: normal;
+  font-weight: 400 800;
+  font-display: swap;
+  src: url("/static/fonts/Manrope-Latin-ext.woff2") format("woff2");
+  unicode-range: U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C4, U+2113, U+2C60-2C7F, U+A720-A7FF;
+}
+@font-face {
+  font-family: "Manrope";
+  font-style: normal;
+  font-weight: 400 800;
+  font-display: swap;
+  src: url("/static/fonts/Manrope-Latin.woff2") format("woff2");
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+
+/*
+ * Material Design 3 Expressive, executed "expensive":
+ * tonal surface hierarchy, deep pine primary, brand lime reserved for
+ * dark hero surfaces (matches the favicon), oversized expressive shapes.
+ */
+:root {
+  color-scheme: light;
+
+  --md-primary: #176853;
+  --md-on-primary: #ffffff;
+  --md-primary-container: #d2f2e6;
+  --md-on-primary-container: #002117;
+  --md-primary-deep: #0c3b2e;
+  --md-primary-deep-2: #14532d;
+  --md-brand-lime: #d9eba0;
+
+  --md-secondary: #4a635b;
+  --md-on-secondary: #ffffff;
+  --md-secondary-container: #cce8dd;
+  --md-on-secondary-container: #062018;
+
+  --md-tertiary: #7d5635;
+  --md-tertiary-container: #ffddbe;
+  --md-on-tertiary-container: #2e1500;
+
+  --md-error: #ba1a1a;
+  --md-on-error: #ffffff;
+  --md-error-container: #ffdad6;
+  --md-on-error-container: #410002;
+
+  --md-surface: #f4f7f4;
+  --md-surface-dim: #d8deda;
+  --md-surface-lowest: #ffffff;
+  --md-surface-low: #eef3ef;
+  --md-surface-container: #e7ede8;
+  --md-surface-high: #dfe7e1;
+  --md-surface-highest: #d5ded7;
+
+  --md-on-surface: #141b17;
+  --md-on-surface-variant: #3f4b44;
+  --md-outline: #6f7a74;
+  --md-outline-variant: #c3cec6;
+
+  --md-inverse-surface: #22302a;
+  --md-inverse-on-surface: #e8f1eb;
+
+  --md-glass: rgba(244, 247, 244, 0.78);
+
+  /* Semantic risk roles (WCAG AA on their containers, carried from v1 system) */
+  --risk-high: #94251e;
+  --risk-high-container: #fde8e5;
+  --on-risk-high-container: #4e110c;
+  --risk-high-border: #f0aca4;
+  --risk-high-accent: #c93b32;
+
+  --risk-medium: #7a5300;
+  --risk-medium-container: #fef3d8;
+  --on-risk-medium-container: #422a00;
+  --risk-medium-border: #ecd07e;
+  --risk-medium-accent: #d78e0e;
+
+  --risk-low: #156746;
+  --risk-low-container: #e0f6ec;
+  --on-risk-low-container: #033722;
+  --risk-low-border: #8fd8b3;
+  --risk-low-accent: #229f6d;
+
+  --risk-unrated: #4e5b55;
+  --risk-unrated-container: #eef2ef;
+  --on-risk-unrated-container: #232d28;
+  --risk-unrated-border: #bfcabe;
+  --risk-unrated-accent: #727f79;
+
+  --chart-fact: #176853;
+  --chart-forecast: #c93b32;
+  --chart-grid: rgba(63, 75, 68, 0.12);
+
+  --font-ui: "Manrope", system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+
+  /* M3 + Expressive shape scale */
+  --shape-xs: 8px;
+  --shape-sm: 12px;
+  --shape-md: 16px;
+  --shape-lg: 24px;
+  --shape-xl: 32px;
+  --shape-xxl: 40px;
+  --shape-full: 9999px;
+  --shape-expressive-hero: 36px 36px 36px 14px;
+
+  --elevation-1: 0 1px 3px rgba(18, 42, 32, 0.07), 0 4px 14px -6px rgba(18, 42, 32, 0.10);
+  --elevation-2: 0 2px 6px rgba(18, 42, 32, 0.08), 0 14px 34px -12px rgba(18, 42, 32, 0.18);
+  --elevation-3: 0 4px 10px rgba(18, 42, 32, 0.10), 0 28px 56px -16px rgba(18, 42, 32, 0.26);
+  --elevation-hero: 0 24px 48px -18px rgba(12, 59, 46, 0.55), 0 4px 14px -6px rgba(12, 59, 46, 0.35);
+
+  --state-hover: rgba(20, 27, 23, 0.06);
+  --state-pressed: rgba(20, 27, 23, 0.12);
+  --focus-ring: #176853;
+
+  --motion-emphasized: cubic-bezier(0.05, 0.7, 0.1, 1);
+  --motion-standard: cubic-bezier(0.2, 0, 0, 1);
+}
+
+:root[data-theme="dark"] {
+  color-scheme: dark;
+
+  --md-primary: #76d7b9;
+  --md-on-primary: #00382a;
+  --md-primary-container: #00513d;
+  --md-on-primary-container: #93f4d5;
+  --md-primary-deep: #0a2e24;
+  --md-primary-deep-2: #0f4434;
+  --md-brand-lime: #d9eba0;
+
+  --md-secondary: #b1ccbf;
+  --md-on-secondary: #1d352d;
+  --md-secondary-container: #334b43;
+  --md-on-secondary-container: #cce8db;
+
+  --md-tertiary: #f0be94;
+  --md-tertiary-container: #633e1f;
+  --md-on-tertiary-container: #ffddbe;
+
+  --md-error: #ffb4ab;
+  --md-on-error: #690005;
+  --md-error-container: #93000a;
+  --md-on-error-container: #ffdad6;
+
+  --md-surface: #0b100e;
+  --md-surface-dim: #0b100e;
+  --md-surface-lowest: #070b09;
+  --md-surface-low: #131a16;
+  --md-surface-container: #18201b;
+  --md-surface-high: #222b25;
+  --md-surface-highest: #2e3831;
+
+  --md-on-surface: #e2eae4;
+  --md-on-surface-variant: #bcc9c0;
+  --md-outline: #88948c;
+  --md-outline-variant: #3d4a42;
+
+  --md-inverse-surface: #e2eae4;
+  --md-inverse-on-surface: #22302a;
+
+  --md-glass: rgba(11, 16, 14, 0.76);
+
+  --risk-high: #ffb4ab;
+  --risk-high-container: #471410;
+  --on-risk-high-container: #ffdad6;
+  --risk-high-border: #8d211a;
+  --risk-high-accent: #ff897d;
+
+  --risk-medium: #fedc94;
+  --risk-medium-container: #3f2900;
+  --on-risk-medium-container: #ffe0a3;
+  --risk-medium-border: #7c5200;
+  --risk-medium-accent: #f5b536;
+
+  --risk-low: #82d9aa;
+  --risk-low-container: #003823;
+  --on-risk-low-container: #c4f3d9;
+  --risk-low-border: #146946;
+  --risk-low-accent: #43bf85;
+
+  --risk-unrated: #b8c4be;
+  --risk-unrated-container: #242c28;
+  --on-risk-unrated-container: #e0e7e3;
+  --risk-unrated-border: #49534e;
+  --risk-unrated-accent: #8c9892;
+
+  --chart-fact: #76d7b9;
+  --chart-forecast: #ff897d;
+  --chart-grid: rgba(188, 201, 192, 0.10);
+
+  --elevation-1: 0 1px 3px rgba(0, 0, 0, 0.45), 0 4px 14px -6px rgba(0, 0, 0, 0.5);
+  --elevation-2: 0 2px 6px rgba(0, 0, 0, 0.5), 0 14px 34px -12px rgba(0, 0, 0, 0.6);
+  --elevation-3: 0 4px 10px rgba(0, 0, 0, 0.55), 0 28px 56px -16px rgba(0, 0, 0, 0.7);
+  --elevation-hero: 0 24px 48px -18px rgba(0, 0, 0, 0.8), 0 0 0 1px rgba(118, 215, 185, 0.14), 0 4px 14px -6px rgba(0, 0, 0, 0.5);
+
+  --state-hover: rgba(255, 255, 255, 0.08);
+  --state-pressed: rgba(255, 255, 255, 0.14);
+  --focus-ring: #76d7b9;
+}
