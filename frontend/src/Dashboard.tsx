@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { AnimatePresence, motion } from "framer-motion";
 import type {
   Customer,
@@ -11,15 +11,19 @@ import type {
 } from "./types";
 import { RISK_LABELS } from "./types";
 import { api, ApiError } from "./api";
-import { customerWord, integer, money as moneyFormat, money, timeLabel, todayLabel } from "./format";
+import { customerWord, integer, money as moneyFormat, money, todayLabel } from "./format";
 import { useTheme } from "./theme";
 import { fadeRise, pageVariants, springEmphasized, springSnappy } from "./motion";
 import { CustomerList, type SavedView } from "./components/CustomerList";
 import { RiskDonut } from "./components/RiskDonut";
-import { RiskStream } from "./components/RiskStream";
+const RiskStream = lazy(() =>
+  import("./components/RiskStream").then((m) => ({ default: m.RiskStream })),
+);
 import { KpiCards, KpiSkeletons } from "./components/KpiCards";
 import { WeightControls } from "./components/WeightControls";
-import { RiskBars } from "./components/RiskBars";
+const RiskBars = lazy(() =>
+  import("./components/RiskBars").then((m) => ({ default: m.RiskBars })),
+);
 import { WhatIfPanel } from "./components/WhatIf";
 import {
   DataQuality,
@@ -42,6 +46,16 @@ import { IconArrowRight, IconArrowUpRight, IconChevron, IconUpload } from "./ico
 
 const PAGE_SIZE = 50;
 const PAGE_ORDER: SectionId[] = ["overview", "customers", "model"];
+
+function PanelSkeleton() {
+  return (
+    <div className="panel panel-skeleton" aria-hidden="true">
+      <span className="skeleton skeleton-line skeleton-line-narrow" />
+      <span className="skeleton skeleton-line skeleton-line-wide" />
+      <span className="skeleton skeleton-line" />
+    </div>
+  );
+}
 
 type SaveStatus = "synced" | "saving" | "error";
 
@@ -270,12 +284,21 @@ export function Dashboard() {
   const [offset, setOffset] = useState(0);
   const [direction, setDirection] = useState(1);
   const [expandedId, setExpandedId] = useState<string | null>(null);
+  const [sidebarMode, setSidebarMode] = useState<"expanded" | "rail">(() => {
+    try {
+      const saved = window.localStorage.getItem("kontur.sidebar.v1");
+      if (saved === "rail" || saved === "expanded") return saved;
+    } catch {
+      /* storage unavailable */
+    }
+    return window.matchMedia("(max-width: 1280px)").matches ? "rail" : "expanded";
+  });
   const [page, setPage] = useState<SectionId>(() => pageFromHash());
   const [pageDirection, setPageDirection] = useState(1);
   const [connectionError, setConnectionError] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [initialLoading, setInitialLoading] = useState(true);
-  const [lastUpdated, setLastUpdated] = useState("только что");
+  const [lastUpdatedAt, setLastUpdatedAt] = useState<number | null>(null);
   const [saveStatus, setSaveStatus] = useState<SaveStatus>("synced");
   const [toast, setToast] = useState<ToastState | null>(null);
   const [uploadPhase, setUploadPhase] = useState<UploadPhase>("idle");
@@ -297,6 +320,37 @@ export function Dashboard() {
   const dragCounter = useRef(0);
   const summaryRef = useRef<Summary | null>(null);
   const signatureRef = useRef<string>("");
+
+  const toggleSidebar = useCallback(() => {
+    setSidebarMode((mode) => {
+      const next = mode === "rail" ? "expanded" : "rail";
+      try {
+        window.localStorage.setItem("kontur.sidebar.v1", next);
+      } catch {
+        /* storage unavailable */
+      }
+      return next;
+    });
+  }, []);
+
+  /* Pointer-follow spotlight for panels (delegated, transform-free). */
+  const spotPanelRef = useRef<HTMLElement | null>(null);
+  const handleSpotlight = (event: React.PointerEvent<HTMLElement>) => {
+    const panel = (event.target as HTMLElement).closest(".panel") as HTMLElement | null;
+    if (spotPanelRef.current && spotPanelRef.current !== panel) {
+      spotPanelRef.current.style.setProperty("--spot", "0");
+    }
+    spotPanelRef.current = panel;
+    if (!panel) return;
+    const rect = panel.getBoundingClientRect();
+    panel.style.setProperty("--mx", `${event.clientX - rect.left}px`);
+    panel.style.setProperty("--my", `${event.clientY - rect.top}px`);
+    panel.style.setProperty("--spot", "1");
+  };
+  const clearSpotlight = () => {
+    spotPanelRef.current?.style.setProperty("--spot", "0");
+    spotPanelRef.current = null;
+  };
   const historyRef = useRef<HistoryPoint[]>(loadHistory());
 
   const showToast = useCallback((message: string, persistent = false) => {
@@ -461,7 +515,7 @@ export function Dashboard() {
           }
           if (freshSettings) setSettings(freshSettings);
         }
-        setLastUpdated(`Обновлено ${timeLabel()}`);
+        setLastUpdatedAt(Date.now());
         setConnectionError(false);
         setLoadError(null);
         setInitialLoading(false);
@@ -910,10 +964,12 @@ export function Dashboard() {
         <KpiSkeletons />
       )}
 
-      <RiskBars
-        customers={landscapeCustomers}
-        onOpen={(customer) => openCustomer(customer.id, customer.riskLevel)}
-      />
+      <Suspense fallback={<PanelSkeleton />}>
+        <RiskBars
+          customers={landscapeCustomers}
+          onOpen={(customer) => openCustomer(customer.id, customer.riskLevel)}
+        />
+      </Suspense>
 
       <section className="overview-analytics" aria-label="Сводная аналитика">
         <motion.article
@@ -942,7 +998,9 @@ export function Dashboard() {
         </motion.article>
 
         {summary ? (
-          <RiskStream summary={summary} customers={landscapeCustomers} />
+          <Suspense fallback={<PanelSkeleton />}>
+            <RiskStream summary={summary} customers={landscapeCustomers} />
+          </Suspense>
         ) : (
           <motion.article
             className="panel riskstream-panel"
@@ -1144,11 +1202,13 @@ export function Dashboard() {
   /* ---------------- render ---------------- */
 
   return (
-    <div className="app-shell">
+    <div className="app-shell" data-sidebar={sidebarMode}>
       <a className="skip-link" href="#mainContent">
         Перейти к содержимому
       </a>
       <Sidebar
+        collapsed={sidebarMode === "rail"}
+        onToggleSidebar={toggleSidebar}
         activeSection={page}
         onNavigate={goToPage}
         customerCount={summary ? integer(summary.customerCount) : "—"}
@@ -1157,7 +1217,13 @@ export function Dashboard() {
         onLogout={() => void logout()}
       />
 
-      <main className="main-content" id="mainContent" tabIndex={-1}>
+      <main
+        className="main-content"
+        id="mainContent"
+        tabIndex={-1}
+        onPointerMove={handleSpotlight}
+        onPointerLeave={clearSpotlight}
+      >
         <Topbar
           sectionLabel={
             { overview: "Обзор", customers: "Клиенты", model: "Модель риска" }[page]
@@ -1165,7 +1231,7 @@ export function Dashboard() {
           theme={theme}
           onToggleTheme={toggleTheme}
           connectionError={connectionError}
-          lastUpdated={lastUpdated}
+          lastUpdatedAt={lastUpdatedAt}
           uploadPhase={uploadPhase}
           onUploadClick={() => fileInputRef.current?.click()}
           fileInputRef={fileInputRef}

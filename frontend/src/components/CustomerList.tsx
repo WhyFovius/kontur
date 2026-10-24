@@ -27,6 +27,7 @@ import {
   IconChevron,
   IconCopy,
   IconMail,
+  IconUsers,
 } from "../icons";
 
 /* ------------------------------------------------------------------ */
@@ -803,6 +804,23 @@ export function CustomerList(props: CustomerListProps) {
   const first = total ? offset + 1 : 0;
   const last = Math.min(offset + items.length, total);
 
+  const emptyTitle =
+    risk === "unrated"
+      ? "Все клиенты оценены"
+      : risk === "high"
+        ? "Высокого риска сейчас нет"
+        : risk
+          ? `Сегмент «${RISK_LABELS[risk]}» пуст`
+          : "Клиентов пока нет";
+  const emptyText =
+    risk === "unrated"
+      ? "В текущем снимке у каждого клиента есть риск-скор — данные полные, можно работать дальше."
+      : risk === "high"
+        ? "Срочных контактов не требуется. Загляните в средний риск — там плановые продления."
+        : risk
+          ? "В текущем снимке таких клиентов нет. Сбросьте фильтр, чтобы увидеть весь портфель."
+          : "Загрузите JSON-снимок — клиенты появятся здесь автоматически.";
+
   return (
     <>
       <div className="panel-heading table-heading">
@@ -879,13 +897,30 @@ export function CustomerList(props: CustomerListProps) {
         </div>
       ) : items.length === 0 ? (
         <motion.div
-          className="table-state"
+          className="table-state table-state-rich"
           initial={{ opacity: 0, scale: 0.98 }}
           animate={{ opacity: 1, scale: 1 }}
           transition={springEmphasized}
         >
-          <strong>Для выбранного фильтра клиентов нет</strong>
-          <span>Попробуйте другой уровень риска — список перестроится сам.</span>
+          <motion.span
+            className="empty-state-icon"
+            initial={{ y: 10, opacity: 0 }}
+            animate={{ y: [0, -5, 0], opacity: 1 }}
+            transition={{
+              opacity: { duration: 0.25 },
+              y: { duration: 3.6, repeat: Infinity, ease: "easeInOut" },
+            }}
+            aria-hidden="true"
+          >
+            <IconUsers />
+          </motion.span>
+          <strong>{emptyTitle}</strong>
+          <span>{emptyText}</span>
+          {risk ? (
+            <md-filled-tonal-button onClick={() => onRiskChange("")}>
+              Показать всех клиентов
+            </md-filled-tonal-button>
+          ) : null}
         </motion.div>
       ) : (
         <motion.div className="customer-rows" role="list" layoutScroll={false}>

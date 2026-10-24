@@ -1,8 +1,10 @@
-import { StrictMode } from "react";
+import { lazy, StrictMode, Suspense } from "react";
 import { createRoot } from "react-dom/client";
 import { MotionConfig } from "framer-motion";
 import "./material";
-import { Dashboard } from "./Dashboard";
+const Dashboard = lazy(() =>
+  import("./Dashboard").then((m) => ({ default: m.Dashboard })),
+);
 import { Login } from "./Login";
 import "./styles/tokens.css";
 import "./styles/dashboard.css";
@@ -16,7 +18,13 @@ const isLogin = window.location.pathname === "/login";
 createRoot(document.getElementById("root") as HTMLElement).render(
   <StrictMode>
     <MotionConfig reducedMotion="user">
-      {isLogin ? <Login /> : <Dashboard />}
+      {isLogin ? (
+        <Login />
+      ) : (
+        <Suspense fallback={<div className="app-loading" aria-label="Загружаем рабочее пространство" />}>
+          <Dashboard />
+        </Suspense>
+      )}
     </MotionConfig>
   </StrictMode>,
 );
