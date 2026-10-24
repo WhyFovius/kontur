@@ -23,14 +23,33 @@ export function Login() {
   const [error, setError] = useState<string | null>(null);
   const [invalid, setInvalid] = useState(false);
   const [phase, setPhase] = useState<Phase>("idle");
+  const [oidc, setOidc] = useState<{ name: string; loginUrl: string } | null>(null);
   const submitLock = useRef(false);
   const shake = useAnimationControls();
 
   useEffect(() => {
     document.title = "Вход · Aéza Контур";
-    if (new URLSearchParams(window.location.search).has("expired")) {
+    const params = new URLSearchParams(window.location.search);
+    if (params.has("expired")) {
       setError("Сессия завершилась. Войдите снова.");
     }
+    if (params.has("oidc_error")) {
+      setError("Не удалось войти через SSO. Попробуйте ещё раз или используйте пароль.");
+    }
+    // Offer the SSO button only when an OIDC provider is configured;
+    // the password form stays as the fallback either way.
+    fetch("/api/v1/auth/providers", { credentials: "same-origin" })
+      .then((response) => (response.ok ? response.json() : null))
+      .then((payload) => {
+        const provider = payload?.oidc;
+        if (provider?.enabled && provider.loginUrl) {
+          setOidc({
+            name: provider.name || "SSO",
+            loginUrl: provider.loginUrl,
+          });
+        }
+      })
+      .catch(() => undefined);
     // The form's `animate` is bound to the shake controls, so the entrance
     // must be driven through the same controls (whileInView would be ignored).
     void shake.start({
@@ -303,6 +322,20 @@ export function Login() {
               </>
             )}
           </md-filled-button>
+
+          {oidc && (
+            <>
+              <div className="login-divider" aria-hidden="true">
+                <span>или</span>
+              </div>
+              <md-outlined-button class="login-sso" href={oidc.loginUrl}>
+                <span slot="icon" className="md-icon-wrap">
+                  <IconLock />
+                </span>
+                Войти через {oidc.name}
+              </md-outlined-button>
+            </>
+          )}
 
           <p className="login-footnote">
             <IconLock /> Сессия хранится в защищённой cookie

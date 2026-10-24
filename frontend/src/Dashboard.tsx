@@ -3,6 +3,7 @@ import { AnimatePresence, motion } from "framer-motion";
 import type {
   Customer,
   CustomerList as CustomerListData,
+  ChurnTimelineData,
   ModelSettings,
   RiskLevel,
   SortKey,
@@ -16,6 +17,7 @@ import { useTheme } from "./theme";
 import { fadeRise, pageVariants, springEmphasized, springSnappy } from "./motion";
 import { CustomerList, type SavedView } from "./components/CustomerList";
 import { RiskDonut } from "./components/RiskDonut";
+import { ChurnTimeline } from "./components/ChurnTimeline";
 const RiskStream = lazy(() =>
   import("./components/RiskStream").then((m) => ({ default: m.RiskStream })),
 );
@@ -282,6 +284,7 @@ export function Dashboard() {
 
   const [username, setUsername] = useState("Аналитик");
   const [summary, setSummary] = useState<Summary | null>(null);
+  const [churnTimeline, setChurnTimeline] = useState<ChurnTimelineData | null>(null);
   const [customers, setCustomers] = useState<CustomerListData>({ items: [], total: 0 });
   const [topQueue, setTopQueue] = useState<CustomerListData>({ items: [], total: 0 });
   const [settings, setSettings] = useState<ModelSettings | null>(null);
@@ -340,44 +343,6 @@ export function Dashboard() {
     });
   }, []);
 
-  /* Pointer-follow spotlight for panels: delegated and rAF-throttled, so
-     pointermove never paints more than once per frame. */
-  const spotPanelRef = useRef<HTMLElement | null>(null);
-  const spotFrameRef = useRef<number | null>(null);
-  const spotPointRef = useRef<{ target: HTMLElement; x: number; y: number } | null>(null);
-  const handleSpotlight = (event: React.PointerEvent<HTMLElement>) => {
-    spotPointRef.current = {
-      target: event.target as HTMLElement,
-      x: event.clientX,
-      y: event.clientY,
-    };
-    if (spotFrameRef.current !== null) return;
-    spotFrameRef.current = window.requestAnimationFrame(() => {
-      spotFrameRef.current = null;
-      const point = spotPointRef.current;
-      if (!point) return;
-      const panel = point.target.closest(".panel") as HTMLElement | null;
-      if (spotPanelRef.current && spotPanelRef.current !== panel) {
-        spotPanelRef.current.style.setProperty("--spot", "0");
-      }
-      spotPanelRef.current = panel;
-      if (!panel) return;
-      const rect = panel.getBoundingClientRect();
-      const snap = (value: number) => Math.round(value / 4) * 4;
-      panel.style.setProperty("--mx", `${snap(point.x - rect.left)}px`);
-      panel.style.setProperty("--my", `${snap(point.y - rect.top)}px`);
-      panel.style.setProperty("--spot", "1");
-    });
-  };
-  const clearSpotlight = () => {
-    if (spotFrameRef.current !== null) {
-      window.cancelAnimationFrame(spotFrameRef.current);
-      spotFrameRef.current = null;
-    }
-    spotPointRef.current = null;
-    spotPanelRef.current?.style.setProperty("--spot", "0");
-    spotPanelRef.current = null;
-  };
   const historyRef = useRef<HistoryPoint[]>(loadHistory());
 
   const showToast = useCallback((message: string, persistent = false) => {
@@ -483,18 +448,20 @@ export function Dashboard() {
         });
         const requests: [
           Promise<Summary>,
+          Promise<ChurnTimelineData>,
           Promise<CustomerListData>,
           Promise<CustomerListData>,
           Promise<CustomerListData>,
           Promise<ModelSettings | null>,
         ] = [
           api<Summary>("/api/v1/analytics/summary"),
+          api<ChurnTimelineData>("/api/v1/analytics/churn-timeline"),
           api<CustomerListData>(`/api/v1/customers?${params}`),
           api<CustomerListData>(`/api/v1/customers?${queueParams}`),
           api<CustomerListData>(`/api/v1/customers?${landscapeParams}`),
           includeSettings ? api<ModelSettings>("/api/v1/model/settings") : Promise.resolve(null),
         ];
-        const [summaryData, firstPage, queueData, landscapeData, freshSettings] =
+        const [summaryData, timelineData, firstPage, queueData, landscapeData, freshSettings] =
           await Promise.all(requests);
         let customerData = firstPage;
         let nextOffset = effective.offset;
@@ -508,7 +475,7 @@ export function Dashboard() {
         }
 
         // Avoid pointless re-renders (and re-animations) on identical polls.
-        const signature = JSON.stringify([summaryData, customerData, queueData, landscapeData, freshSettings]);
+        const signature = JSON.stringify([summaryData, timelineData, customerData, queueData, landscapeData, freshSettings]);
         if (signature !== signatureRef.current) {
           signatureRef.current = signature;
           const previous = summaryRef.current;
@@ -524,6 +491,7 @@ export function Dashboard() {
           }
           summaryRef.current = summaryData;
           setSummary(summaryData);
+          setChurnTimeline(timelineData);
           setCustomers(customerData);
           setTopQueue(queueData);
           setLandscapeCustomers(landscapeData.items);
@@ -1063,6 +1031,8 @@ export function Dashboard() {
         )}
       </section>
 
+      <ChurnTimeline data={churnTimeline} />
+
       {summary && (
         <section className="overview-insights" aria-label="Сценарии, динамика и качество данных">
           <RevenueCalculator lossHigh={levelLosses.high} lossMedium={levelLosses.medium} />
@@ -1269,8 +1239,6 @@ export function Dashboard() {
         className="main-content"
         id="mainContent"
         tabIndex={-1}
-        onPointerMove={handleSpotlight}
-        onPointerLeave={clearSpotlight}
       >
         <Topbar
           sectionLabel={

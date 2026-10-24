@@ -496,6 +496,7 @@ def init_db() -> None:
         CREATE TABLE IF NOT EXISTS sessions (token_hash TEXT PRIMARY KEY, username TEXT NOT NULL, expires_at TEXT NOT NULL);
         CREATE TABLE IF NOT EXISTS metadata (key TEXT PRIMARY KEY, value TEXT NOT NULL);
         CREATE TABLE IF NOT EXISTS login_attempts (key TEXT PRIMARY KEY, window_started REAL NOT NULL, attempts INTEGER NOT NULL);
+        CREATE TABLE IF NOT EXISTS oidc_states (state_hash TEXT PRIMARY KEY, nonce TEXT NOT NULL, code_verifier TEXT NOT NULL, expires_at TEXT NOT NULL);
         CREATE INDEX IF NOT EXISTS services_account_id_idx ON services(account_id);
         CREATE INDEX IF NOT EXISTS transactions_account_id_idx ON transactions(account_id);
         """)

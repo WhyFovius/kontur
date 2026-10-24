@@ -104,6 +104,49 @@ class AnalyticsSummary(BaseModel):
     unit: Literal["eurocents"] = "eurocents"
 
 
+class ChurnPastBucket(BaseModel):
+    label: str
+    fromDays: int
+    toDays: int
+    deleted: int
+
+
+class ChurnFutureBucket(BaseModel):
+    label: str
+    fromDays: int
+    toDays: int
+    servicesAtRisk: int
+    expectedNonRenewals: float
+
+
+class ChurnTimelineTotals(BaseModel):
+    deletedServices: int
+    deleted90d: int
+    servicesAtRisk30d: int
+    expectedNonRenewals30d: float
+    servicesAtRisk90d: int
+    expectedNonRenewals90d: float
+
+
+class ChurnTimelineResponse(BaseModel):
+    generatedAt: str
+    past: list[ChurnPastBucket]
+    future: list[ChurnFutureBucket]
+    totals: ChurnTimelineTotals
+    method: str
+
+
+class OidcProviderInfo(BaseModel):
+    enabled: bool
+    name: str | None = None
+    loginUrl: str | None = None
+
+
+class AuthProvidersResponse(BaseModel):
+    password: bool
+    oidc: OidcProviderInfo
+
+
 class ModelSettingsResponse(BaseModel):
     weights: dict[str, float]
     features: dict[str, str]

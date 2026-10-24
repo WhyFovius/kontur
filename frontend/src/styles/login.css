@@ -310,3 +310,20 @@
 @media (prefers-reduced-motion: reduce) {
   .login-mascot-card { transition: none; }
 }
+
+
+/* OIDC (SSO) sign-in — shown only when a provider is configured; the
+   password form above remains the fallback. */
+.login-divider {
+  display: flex; align-items: center; gap: 12px;
+  color: var(--md-on-surface-variant); font-size: 12px; font-weight: 600;
+  letter-spacing: .06em; text-transform: uppercase;
+}
+.login-divider::before, .login-divider::after {
+  content: ""; flex: 1; height: 1px;
+  background: color-mix(in srgb, var(--md-outline-variant) 80%, transparent);
+}
+.login-sso {
+  width: 100%;
+  --md-outlined-button-container-shape: var(--shape-lg);
+}

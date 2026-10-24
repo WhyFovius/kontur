@@ -2,7 +2,7 @@ import { useEffect, useState, type RefObject } from "react";
 import { AnimatePresence, motion } from "framer-motion";
 import type { Theme, ThemeToggleOrigin } from "../theme";
 import { THEME_WAVE_DURATION_MS } from "../theme";
-import { EASE_EMPHASIZED, springSnappy, springEmphasized, springFollow } from "../motion";
+import { EASE_EMPHASIZED, springSnappy, springEmphasized, springExEffects, springFollow } from "../motion";
 import { useDragSelect } from "./useDragSelect";
 import { AezaLogo } from "./Brand";
 import {
@@ -435,36 +435,24 @@ export function Topbar({
             <motion.span
               className="upload-label-layer"
               initial={false}
-              animate={
-                uploadPhase === "idle"
-                  ? { opacity: 1, y: 0, scale: 1 }
-                  : { opacity: 0, y: 6, scale: 0.92 }
-              }
-              transition={springSnappy}
+              animate={{ opacity: uploadPhase === "idle" ? 1 : 0 }}
+              transition={springExEffects}
             >
               <IconUpload /> Загрузить снимок
             </motion.span>
             <motion.span
               className="upload-label-layer"
               initial={false}
-              animate={
-                uploading
-                  ? { opacity: 1, y: 0, scale: 1 }
-                  : { opacity: 0, y: 6, scale: 0.92 }
-              }
-              transition={springSnappy}
+              animate={{ opacity: uploading ? 1 : 0 }}
+              transition={springExEffects}
             >
               <span className="button-spinner" aria-hidden="true" /> Загружаем…
             </motion.span>
             <motion.span
               className="upload-label-layer"
               initial={false}
-              animate={
-                uploadPhase === "success"
-                  ? { opacity: 1, y: 0, scale: 1 }
-                  : { opacity: 0, y: 6, scale: 0.92 }
-              }
-              transition={springSnappy}
+              animate={{ opacity: uploadPhase === "success" ? 1 : 0 }}
+              transition={springExEffects}
             >
               <IconCheck /> Снимок обновлён
             </motion.span>

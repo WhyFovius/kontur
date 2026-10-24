@@ -74,6 +74,44 @@ paths:
                 properties:
                   ok: { type: boolean, const: true }
         '401': { $ref: '#/components/responses/Unauthorized' }
+  /api/v1/auth/providers:
+    get:
+      tags: [Authentication]
+      summary: List enabled login methods (password / OIDC)
+      responses:
+        '200':
+          description: Enabled authentication providers.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AuthProvidersResponse' }
+  /api/v1/auth/oidc/login:
+    get:
+      tags: [Authentication]
+      summary: Start the OIDC authorization-code flow (PKCE)
+      responses:
+        '302':
+          description: Redirect to the identity provider.
+        '503':
+          description: OIDC is not configured.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+  /api/v1/auth/oidc/callback:
+    get:
+      tags: [Authentication]
+      summary: OIDC callback — verifies the ID token and creates a session
+      parameters:
+        - { name: code, in: query, schema: { type: string } }
+        - { name: state, in: query, schema: { type: string } }
+        - { name: error, in: query, schema: { type: string } }
+      responses:
+        '303':
+          description: Redirect to the panel on success, to /login?oidc_error=1 on failure.
+        '503':
+          description: OIDC is not configured.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
   /api/v1/customers:
     get:
       tags: [Customers]
@@ -143,6 +181,18 @@ paths:
           content:
             application/json:
               schema: { $ref: '#/components/schemas/AnalyticsSummary' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+  /api/v1/analytics/churn-timeline:
+    get:
+      tags: [Analytics]
+      summary: Historical deletions (fact) vs expected non-renewals (forecast)
+      security: [{ AdminSession: [] }]
+      responses:
+        '200':
+          description: Fact/forecast churn timeline buckets.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ChurnTimelineResponse' }
         '401': { $ref: '#/components/responses/Unauthorized' }
   /api/v1/model/settings:
     get:
@@ -301,6 +351,52 @@ components:
         estimatedLoss: { type: integer, description: Three-month potential loss in eurocents. }
         monthlyRevenue: { type: integer, description: Estimated monthly revenue in eurocents. }
         daysToExpiry: { type: [number, 'null'] }
+    AuthProvidersResponse:
+      type: object
+      required: [password, oidc]
+      properties:
+        password: { type: boolean }
+        oidc:
+          type: object
+          required: [enabled]
+          properties:
+            enabled: { type: boolean }
+            name: { type: [string, 'null'] }
+            loginUrl: { type: [string, 'null'] }
+    ChurnTimelineResponse:
+      type: object
+      required: [generatedAt, past, future, totals, method]
+      properties:
+        generatedAt: { type: string }
+        past:
+          type: array
+          items:
+            type: object
+            properties:
+              label: { type: string }
+              fromDays: { type: integer }
+              toDays: { type: integer }
+              deleted: { type: integer }
+        future:
+          type: array
+          items:
+            type: object
+            properties:
+              label: { type: string }
+              fromDays: { type: integer }
+              toDays: { type: integer }
+              servicesAtRisk: { type: integer }
+              expectedNonRenewals: { type: number }
+        totals:
+          type: object
+          properties:
+            deletedServices: { type: integer }
+            deleted90d: { type: integer }
+            servicesAtRisk30d: { type: integer }
+            expectedNonRenewals30d: { type: number }
+            servicesAtRisk90d: { type: integer }
+            expectedNonRenewals90d: { type: number }
+        method: { type: string }
     AnalyticsSummary:
       type: object
       required: [customerCount, ratedCount, unratedCount, highRisk, mediumRisk, lowRisk, estimatedLoss, monthlyRevenueAtRisk, atRiskServices, churnForecast, currency, unit]

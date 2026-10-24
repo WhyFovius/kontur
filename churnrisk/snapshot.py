@@ -19,6 +19,7 @@ FIELD_ALIASES = {
     "paymentTerm": ("paymentTerm", "payment_term", "billing_period"),
     "autoprolong": ("autoprolong", "auto_renew", "autoRenew"),
     "expiresAt": ("expiresAt", "expires_at", "expiration_date"),
+    "deletedAt": ("deletedAt", "deleted_at", "removedAt", "removed_at"),
 }
 
 
