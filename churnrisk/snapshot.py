@@ -10,7 +10,24 @@ COLLECTION_ALIASES = {
 FIELD_ALIASES = {
     "id": ("id", "_id"),
     "email": ("email", "email_address"),
-    "accountId": ("accountId", "account_id", "userId", "user_id", "customerId", "customer_id", "client_id"),
+    "accountId": (
+        "accountId",
+        "account_id",
+        "userId",
+        "user_id",
+        "customerId",
+        "customer_id",
+        "clientId",
+        "client_id",
+        "ownerId",
+        "owner_id",
+    ),
+    "serviceId": (
+        "serviceId",
+        "service_id",
+        "subscriptionId",
+        "subscription_id",
+    ),
     "withdrawBalance": ("withdrawBalance", "withdraw_balance"),
     "bonusBalance": ("bonusBalance", "bonus_balance"),
     "bonusState": (
@@ -25,7 +42,13 @@ FIELD_ALIASES = {
     ),
     "totalReplenished": ("totalReplenished", "total_replenished"),
     "paymentTerm": ("paymentTerm", "payment_term", "billing_period"),
-    "autoprolong": ("autoprolong", "auto_renew", "autoRenew"),
+    "autoprolong": (
+        "autoprolong",
+        "autoProlong",
+        "auto_prolong",
+        "auto_renew",
+        "autoRenew",
+    ),
     "expiresAt": ("expiresAt", "expires_at", "expiration_date"),
     "deletedAt": ("deletedAt", "deleted_at", "removedAt", "removed_at"),
 }

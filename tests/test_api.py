@@ -412,6 +412,48 @@ class ApiTests(unittest.TestCase):
         )
         self.assertIs(customers["items"][0]["services"][0]["autoprolong"], True)
 
+    def test_snapshot_upload_accepts_service_linked_export_shape(self):
+        response = self.client.put(
+            "/api/v1/source/snapshot",
+            json={
+                "accounts": [
+                    {
+                        "id": 601,
+                        "email": "service-linked@example.org",
+                        "balance": 100,
+                        "bonusBalance": 400,
+                        "bonusState": "unlocked",
+                    }
+                ],
+                "services": [
+                    {
+                        "id": "s-601",
+                        "ownerId": 601,
+                        "status": "active",
+                        "price": 300,
+                        "paymentTerm": "month",
+                        "autoProlong": True,
+                    }
+                ],
+                "transactions": [
+                    {
+                        "id": "p-601",
+                        "serviceId": "s-601",
+                        "status": "not_performed",
+                        "type": "prolong",
+                        "amount": 300,
+                    }
+                ],
+            },
+        )
+        self.assertEqual(response.status_code, 200, response.text)
+        customers = self.client.get("/api/v1/customers").json()
+        self.assertEqual(customers["total"], 1)
+        customer = customers["items"][0]
+        self.assertEqual(customer["availableBalance"], 500)
+        self.assertIs(customer["services"][0]["autoprolong"], True)
+        self.assertTrue(customer["features"]["failed_transactions"])
+
     def test_invalid_snapshot_does_not_delete_current_data(self):
         response = self.client.put(
             "/api/v1/source/snapshot",

@@ -180,6 +180,125 @@ class DomainTests(unittest.TestCase):
         self.assertIs(normalized["services"][0]["autoprolong"], True)
         self.assertIs(normalized["services"][1]["autoprolong"], False)
 
+    def test_snapshot_accepts_service_linked_export_shape(self):
+        snapshot = {
+            "accounts": [
+                {
+                    "id": 1,
+                    "email": "locked@example.org",
+                    "balance": 10,
+                    "bonusBalance": 500,
+                    "bonusState": "locked",
+                },
+                {
+                    "id": 2,
+                    "email": "unlocked@example.org",
+                    "balance": 20,
+                    "bonusBalance": 500,
+                    "bonusState": "unlocked",
+                },
+            ],
+            "services": [
+                {
+                    "id": "s1",
+                    "ownerId": 1,
+                    "status": "active",
+                    "price": 100,
+                    "paymentTerm": "month",
+                    "autoProlong": True,
+                },
+                {
+                    "id": "s2",
+                    "owner_id": 2,
+                    "status": "active",
+                    "price": 200,
+                    "paymentTerm": "month",
+                    "autoProlong": False,
+                },
+            ],
+            "transactions": [
+                {
+                    "id": "p1",
+                    "serviceId": "s2",
+                    "status": "not_performed",
+                    "type": "prolong",
+                    "amount": 200,
+                },
+                {
+                    "id": "p2",
+                    "service_id": "s1",
+                    "status": "performed",
+                    "type": "order",
+                    "amount": 100,
+                },
+            ],
+        }
+        normalized = validate_snapshot(snapshot)
+        self.assertEqual(
+            [row["bonusState"] for row in normalized["accounts"]],
+            [False, True],
+        )
+        self.assertEqual(
+            [row["accountId"] for row in normalized["services"]],
+            ["1", "2"],
+        )
+        self.assertEqual(
+            [row["autoprolong"] for row in normalized["services"]],
+            [True, False],
+        )
+        self.assertTrue(
+            all(
+                "ownerId" not in row and "autoProlong" not in row
+                for row in normalized["services"]
+            )
+        )
+        self.assertEqual(
+            [row["accountId"] for row in normalized["transactions"]],
+            ["2", "1"],
+        )
+        self.assertEqual(
+            [row["serviceId"] for row in normalized["transactions"]],
+            ["s2", "s1"],
+        )
+
+        base = {
+            "accounts": [
+                {"id": 1, "email": "one@example.org"},
+                {"id": 2, "email": "two@example.org"},
+            ],
+            "services": [
+                {
+                    "id": "s2",
+                    "ownerId": 2,
+                    "status": "active",
+                    "price": 100,
+                    "paymentTerm": "month",
+                }
+            ],
+        }
+        for transaction in (
+            {
+                "id": "missing-service",
+                "serviceId": "missing",
+                "status": "performed",
+                "type": "order",
+                "amount": 100,
+            },
+            {
+                "id": "wrong-owner",
+                "accountId": 1,
+                "serviceId": "s2",
+                "status": "performed",
+                "type": "order",
+                "amount": 100,
+            },
+        ):
+            with (
+                self.subTest(transaction=transaction),
+                self.assertRaises(SnapshotValidationError),
+            ):
+                validate_snapshot({**base, "transactions": [transaction]})
+
     def test_invalid_relationship_rejects_whole_snapshot(self):
         with self.assertRaises(SnapshotValidationError):
             validate_snapshot(
