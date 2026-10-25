@@ -8,12 +8,14 @@ import logging
 import os
 import secrets
 import time
+import uuid
 from contextlib import asynccontextmanager
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from decimal import Decimal, InvalidOperation
+from pathlib import Path
 from threading import Lock, RLock, Thread
-from typing import Any, Literal
+from typing import Annotated, Any, Literal
 
 from fastapi import Depends, FastAPI, HTTPException, Query, Request, Response, Security
 from fastapi.openapi.docs import get_swagger_ui_html
@@ -42,15 +44,23 @@ from .alerts import (
 )
 from .config import (
     ANALYSIS_CACHE_TTL_SECONDS,
+    DEMO_WORKSPACE_DIR,
+    MAX_REGISTERED_USERS,
     MAX_SNAPSHOT_BYTES,
+    PUBLIC_REGISTRATION_ENABLED,
     SESSION_DAYS,
     STATIC_DIR,
     TEMPLATES_DIR,
 )
 from .database import (
     DatabaseError,
+    active_database_target,
     checkpoint_database,
     close_database_pools,
+    set_active_database_target,
+    sqlite_database_target,
+    use_database_target,
+    use_sqlite_database,
 )
 from .database import (
     database_healthcheck as _database_healthcheck,
@@ -81,10 +91,9 @@ from .realtime import (
     realtime_metric_counts,
     realtime_status,
     reset_demo_data,
+    simulator_for,
+    stop_all_simulators,
     update_reaction_template,
-)
-from .realtime import (
-    simulator as demo_simulator,
 )
 from .schemas import (
     AnalyticsSummary,
@@ -108,6 +117,7 @@ from .schemas import (
     RealtimeEvent,
     RealtimeEventListResponse,
     RealtimeStatusResponse,
+    RegisterRequest,
     RescueQueueResponse,
     SettingsPatch,
     SimulatorActionResponse,
@@ -115,17 +125,25 @@ from .schemas import (
     SnapshotRequest,
     SnapshotResponse,
 )
-from .security import verify_admin
+from .security import configured_admin, password_hash, verify_admin, verify_password
 from .storage import (
+    RegisteredUserExistsError,
     SnapshotValidationError,
     clear_login_failures,
+    count_registered_users,
+    create_registered_user,
     db,
+    delete_registered_user,
+    ensure_auth_schema,
+    get_registered_user,
     get_weights,
     init_db,
     load_prepared_source,
     login_rate_limited,
     record_login_failure,
+    registry_db,
     replace_snapshot,
+    touch_registered_user_login,
     update_weights,
 )
 
@@ -142,7 +160,7 @@ PreparedSource = tuple[
 
 @dataclass
 class _AnalysisCacheEntry:
-    key: tuple[int, int]
+    key: tuple[str, int, int]
     computed_at: float
     generated_at: datetime
     customers: list[dict[str, Any]]
@@ -164,11 +182,27 @@ class _AnalysisCacheEntry:
 
 _analysis_state_lock = RLock()
 _analysis_compute_lock = Lock()
-_analysis_cache: _AnalysisCacheEntry | None = None
+_analysis_cache: dict[str, _AnalysisCacheEntry] = {}
 _prepared_cache_lock = RLock()
-_prepared_cache: tuple[int, PreparedSource] | None = None
+_prepared_cache: dict[str, tuple[int, PreparedSource]] = {}
 _analysis_refresh_lock = Lock()
-_analysis_refresh_running = False
+_analysis_refresh_running: set[str] = set()
+_MAX_CACHED_WORKSPACES = 8
+_workspace_initialization_lock = Lock()
+_initialized_workspace_files: set[str] = set()
+
+
+def _evict_workspace_caches_locked(keep_identity: str) -> None:
+    """Bound analysis memory when many preview workspaces are active."""
+
+    while len(_analysis_cache) >= _MAX_CACHED_WORKSPACES:
+        oldest = next(
+            (identity for identity in _analysis_cache if identity != keep_identity),
+            None,
+        )
+        if oldest is None:
+            break
+        del _analysis_cache[oldest]
 
 
 class RequestSizeLimitMiddleware:
@@ -300,6 +334,22 @@ def _initialize_database() -> None:
         ensure_realtime_tables(connection)
 
 
+def _ensure_workspace_initialized(workspace_file: str) -> Path:
+    """Create/seed one registered user's isolated demo database."""
+
+    path = _workspace_path(workspace_file)
+    if workspace_file in _initialized_workspace_files and path.is_file():
+        return path
+    with _workspace_initialization_lock:
+        if workspace_file in _initialized_workspace_files and path.is_file():
+            return path
+        DEMO_WORKSPACE_DIR.mkdir(parents=True, exist_ok=True)
+        with use_sqlite_database(path):
+            _initialize_database()
+        _initialized_workspace_files.add(workspace_file)
+    return path
+
+
 @asynccontextmanager
 async def lifespan(_: FastAPI):
     await asyncio.to_thread(_initialize_database)
@@ -310,7 +360,7 @@ async def lifespan(_: FastAPI):
     try:
         yield
     finally:
-        await asyncio.to_thread(demo_simulator.stop)
+        await asyncio.to_thread(stop_all_simulators)
         try:
             await asyncio.to_thread(checkpoint_database)
         except DatabaseError:
@@ -342,13 +392,40 @@ async def swagger_docs():
     )
 
 
-def _username_for_token_sync(token: str | None) -> str:
+@dataclass(frozen=True)
+class _AuthContext:
+    username: str
+    auth_kind: str = "admin"
+    workspace_file: str | None = None
+    target: Any = None
+
+    @property
+    def demo(self) -> bool:
+        return self.auth_kind == "demo"
+
+
+def _workspace_path(workspace_file: str) -> Path:
+    safe_name = Path(workspace_file).name
+    if safe_name != workspace_file or not safe_name.endswith(".db"):
+        raise HTTPException(status_code=401, detail="Некорректная сессия")
+    return DEMO_WORKSPACE_DIR / safe_name
+
+
+def _workspace_target(workspace_file: str | None) -> Any:
+    if not workspace_file:
+        return None
+    return sqlite_database_target(_workspace_path(workspace_file))
+
+
+def _auth_context_for_token_sync(token: str | None) -> _AuthContext:
     if not token:
         raise HTTPException(status_code=401, detail="Требуется вход")
     token_hash = hashlib.sha256(token.encode("utf-8")).hexdigest()
-    with db() as connection:
+    with registry_db() as connection:
+        ensure_auth_schema(connection)
         row = connection.execute(
-            "SELECT username, expires_at FROM sessions WHERE token_hash=?",
+            "SELECT username, expires_at, auth_kind, workspace_file "
+            "FROM sessions WHERE token_hash=?",
             (token_hash,),
         ).fetchone()
         if row is None:
@@ -356,11 +433,43 @@ def _username_for_token_sync(token: str | None) -> str:
         expires = datetime.fromisoformat(row["expires_at"])
         if expires <= utcnow():
             raise HTTPException(status_code=401, detail="Сессия истекла")
-    return str(row["username"])
+    workspace_file = row["workspace_file"]
+    workspace_file = str(workspace_file) if workspace_file else None
+    return _AuthContext(
+        username=str(row["username"]),
+        auth_kind=str(row["auth_kind"] or "admin"),
+        workspace_file=workspace_file,
+        target=_workspace_target(workspace_file),
+    )
+
+
+def _username_for_token_sync(token: str | None) -> str:
+    return _auth_context_for_token_sync(token).username
 
 
 async def _username_for_token(token: str | None) -> str:
     return await asyncio.to_thread(_username_for_token_sync, token)
+
+
+async def _auth_context_for_token(token: str | None) -> _AuthContext:
+    return await asyncio.to_thread(_auth_context_for_token_sync, token)
+
+
+async def _current_auth_context(
+    request: Request, token: str | None = Security(session_cookie)
+) -> _AuthContext:
+    basic_username = await _basic_auth_username(request)
+    if basic_username is not None:
+        return _AuthContext(username=basic_username, auth_kind="admin")
+    context = await _auth_context_for_token(token)
+    if context.target is not None:
+        # The endpoint and its thread workers inherit this task context,
+        # so all ordinary storage calls now address the demo workspace.
+        set_active_database_target(context.target)
+    return context
+
+
+CurrentAuthContext = Annotated[_AuthContext, Depends(_current_auth_context)]
 
 
 async def _basic_auth_username(request: Request) -> str | None:
@@ -390,10 +499,7 @@ async def _basic_auth_username(request: Request) -> str | None:
 async def current_user(
     request: Request, token: str | None = Security(session_cookie)
 ) -> str:
-    basic_username = await _basic_auth_username(request)
-    if basic_username is not None:
-        return basic_username
-    return await _username_for_token(token)
+    return (await _current_auth_context(request, token)).username
 
 
 def _public_customer(customer: dict[str, Any]) -> dict[str, Any]:
@@ -437,37 +543,48 @@ def _sync_realtime_alerts(
         logger.exception("Realtime risk monitor sync failed")
 
 
-def _read_analysis_versions() -> tuple[int, int]:
+def _read_analysis_versions() -> tuple[str, int, int]:
     with db() as connection:
+        identity = connection.identity
         versions = connection.execute(
             "SELECT key, value FROM metadata WHERE key IN ('snapshot_version', 'model_version')"
         ).fetchall()
     version_map = {row["key"]: int(row["value"]) for row in versions}
     return (
+        identity,
         version_map.get("snapshot_version", 0),
         version_map.get("model_version", 0),
     )
 
 
-def _prepared_source(snapshot_version: int) -> PreparedSource:
-    global _prepared_cache
+def _prepared_source(identity: str, snapshot_version: int) -> PreparedSource:
     with _prepared_cache_lock:
-        cached = _prepared_cache
+        cached = _prepared_cache.get(identity)
         if cached is not None and cached[0] == snapshot_version:
             return cached[1]
         with db() as connection:
+            if connection.identity != identity:
+                raise DatabaseError("Prepared source requested for another workspace")
             source = load_prepared_source(connection)
-        _prepared_cache = (snapshot_version, source)
+        if identity not in _prepared_cache:
+            while len(_prepared_cache) >= _MAX_CACHED_WORKSPACES:
+                oldest = next(
+                    (key for key in _prepared_cache if key != identity), None
+                )
+                if oldest is None:
+                    break
+                del _prepared_cache[oldest]
+        _prepared_cache[identity] = (snapshot_version, source)
         return source
 
 
 def _compute_analysis(
-    key: tuple[int, int], *, refresh_after: float | None = None
+    key: tuple[str, int, int], *, refresh_after: float | None = None
 ) -> _AnalysisCacheEntry:
-    global _analysis_cache
+    identity = key[0]
     with _analysis_compute_lock:
         with _analysis_state_lock:
-            cached = _analysis_cache
+            cached = _analysis_cache.get(identity)
         if (
             cached is not None
             and cached.key == key
@@ -481,12 +598,14 @@ def _compute_analysis(
             # overwrite the newer entry; refresh the current version instead.
             current_key = _read_analysis_versions()
             if current_key != key:
+                if current_key[0] != identity:
+                    raise DatabaseError("Analysis refresh crossed workspaces")
                 if cached is not None and cached.key == current_key:
                     return cached
                 key = current_key
 
         accounts, services_by_account, transactions_by_account = _prepared_source(
-            key[0]
+            identity, key[1]
         )
         with db() as connection:
             weights = get_weights(connection)
@@ -508,45 +627,52 @@ def _compute_analysis(
             weights=dict(weights),
         )
         with _analysis_state_lock:
-            _analysis_cache = entry
+            if identity not in _analysis_cache:
+                _evict_workspace_caches_locked(identity)
+            _analysis_cache[identity] = entry
         _sync_realtime_alerts(customers, aggregate)
         return entry
 
 
-def _refresh_analysis(key: tuple[int, int], refresh_after: float) -> None:
-    global _analysis_refresh_running
+def _refresh_analysis(
+    key: tuple[str, int, int], refresh_after: float, target: Any
+) -> None:
     try:
-        _compute_analysis(key, refresh_after=refresh_after)
+        with use_database_target(target):
+            _compute_analysis(key, refresh_after=refresh_after)
     except Exception:
         logger.exception("Background analysis refresh failed")
     finally:
         with _analysis_refresh_lock:
-            _analysis_refresh_running = False
+            _analysis_refresh_running.discard(key[0])
 
 
-def _schedule_analysis_refresh(key: tuple[int, int], refresh_after: float) -> None:
-    global _analysis_refresh_running
+def _schedule_analysis_refresh(
+    key: tuple[str, int, int], refresh_after: float
+) -> None:
+    identity = key[0]
+    target = active_database_target()
     with _analysis_refresh_lock:
-        if _analysis_refresh_running:
+        if identity in _analysis_refresh_running:
             return
-        _analysis_refresh_running = True
+        _analysis_refresh_running.add(identity)
     try:
         Thread(
             target=_refresh_analysis,
-            args=(key, refresh_after),
+            args=(key, refresh_after, target),
             daemon=True,
             name="kontur-analysis-refresh",
         ).start()
     except RuntimeError:
         with _analysis_refresh_lock:
-            _analysis_refresh_running = False
+            _analysis_refresh_running.discard(identity)
         logger.warning("Could not start the background analysis refresh", exc_info=True)
 
 
 def _analysis_entry() -> _AnalysisCacheEntry:
     key = _read_analysis_versions()
     with _analysis_state_lock:
-        cached = _analysis_cache
+        cached = _analysis_cache.get(key[0])
     if cached is not None and cached.key == key:
         if time.monotonic() - cached.computed_at < ANALYSIS_CACHE_TTL_SECONDS:
             return cached
@@ -672,20 +798,34 @@ async def login_page(request: Request):
     return RedirectResponse("/", status_code=303)
 
 
-def _create_session(username: str) -> tuple[str, datetime]:
-    """Create a server-side session; shared by password and OIDC login."""
+def _create_session(
+    username: str,
+    *,
+    auth_kind: str = "admin",
+    workspace_file: str | None = None,
+) -> tuple[str, datetime]:
+    """Create a server-side session in the registry database.
+
+    Password, OIDC and registered-preview login all share this path;
+    only preview sessions carry a workspace file.
+    """
     token = secrets.token_urlsafe(36)
     expires_at = utcnow() + timedelta(days=SESSION_DAYS)
-    with db() as connection:
+    with registry_db() as connection:
+        ensure_auth_schema(connection)
         connection.execute(
             "DELETE FROM sessions WHERE expires_at < ?", (iso(utcnow()),)
         )
         connection.execute(
-            "INSERT INTO sessions (token_hash, username, expires_at) VALUES (?, ?, ?)",
+            "INSERT INTO sessions "
+            "(token_hash, username, expires_at, auth_kind, workspace_file) "
+            "VALUES (?, ?, ?, ?, ?)",
             (
                 hashlib.sha256(token.encode("utf-8")).hexdigest(),
                 username,
                 iso(expires_at),
+                auth_kind,
+                workspace_file,
             ),
         )
     return token, expires_at
@@ -710,7 +850,7 @@ def _oidc_redirect_uri(request: Request, config) -> str:
 def _store_oidc_state(
     state_hash: str, nonce: str, verifier: str, expires_at: datetime
 ) -> None:
-    with db() as connection:
+    with registry_db() as connection:
         connection.execute(
             "DELETE FROM oidc_states WHERE expires_at < ?", (iso(utcnow()),)
         )
@@ -722,7 +862,7 @@ def _store_oidc_state(
 
 
 def _pop_oidc_state(state_hash: str):
-    with db() as connection:
+    with registry_db() as connection:
         row = connection.execute(
             "SELECT nonce, code_verifier, expires_at FROM oidc_states"
             " WHERE state_hash=?",
@@ -737,7 +877,11 @@ async def auth_providers():
     """Public: which login methods the panel should offer."""
     config = oidc_service.load_config()
     return {
-        "password": bool(os.getenv("ADMIN_PASSWORD")),
+        "password": bool(os.getenv("ADMIN_PASSWORD")) or PUBLIC_REGISTRATION_ENABLED,
+        "registration": {
+            "enabled": PUBLIC_REGISTRATION_ENABLED,
+            "demo": True,
+        },
         "oidc": {
             "enabled": config is not None,
             "name": config.provider_name if config else None,
@@ -818,10 +962,152 @@ async def oidc_callback(
     return response
 
 
+_RESERVED_USERNAMES = {
+    "admin",
+    "administrator",
+    "root",
+    "support",
+    "system",
+    "aeza",
+    "kontur",
+}
+
+
+def _auth_rate_key(request: Request, purpose: str = "login") -> str:
+    remote_host = request.client.host if request.client else "unknown"
+    raw = remote_host if purpose == "login" else f"{purpose}:{remote_host}"
+    return hashlib.sha256(raw.encode("utf-8")).hexdigest()
+
+
+def _remove_workspace_files(workspace_file: str) -> None:
+    try:
+        path = _workspace_path(workspace_file)
+    except HTTPException:
+        return
+    _initialized_workspace_files.discard(workspace_file)
+    for suffix in ("", "-wal", "-shm", "-journal"):
+        try:
+            Path(f"{path}{suffix}").unlink(missing_ok=True)
+        except OSError:
+            logger.warning("Could not remove a failed demo workspace", exc_info=True)
+
+
+def _authenticate_password_sync(
+    username: str, password: str
+) -> _AuthContext | None:
+    if verify_admin(username, password):
+        admin_username, _admin_password = configured_admin()
+        return _AuthContext(username=admin_username, auth_kind="admin")
+
+    normalized = username.strip().casefold()
+    user = get_registered_user(normalized)
+    if user is None or not verify_password(password, str(user["passwordHash"])):
+        return None
+    workspace_file = str(user["workspaceFile"])
+    _ensure_workspace_initialized(workspace_file)
+    touch_registered_user_login(str(user["id"]))
+    return _AuthContext(
+        username=str(user["username"]),
+        auth_kind="demo",
+        workspace_file=workspace_file,
+        target=_workspace_target(workspace_file),
+    )
+
+
+def _register_user_sync(username: str, password: str) -> _AuthContext:
+    if not PUBLIC_REGISTRATION_ENABLED:
+        raise HTTPException(status_code=403, detail="Регистрация отключена")
+    display_username = username.strip()
+    normalized = display_username.casefold()
+    admin_username, _admin_password = configured_admin()
+    if normalized in _RESERVED_USERNAMES or normalized == admin_username.casefold():
+        raise HTTPException(status_code=422, detail="Этот логин зарезервирован")
+    if get_registered_user(normalized) is not None:
+        raise HTTPException(status_code=409, detail="Такой логин уже занят")
+    if count_registered_users() >= MAX_REGISTERED_USERS:
+        raise HTTPException(
+            status_code=403,
+            detail="Лимит демонстрационных аккаунтов исчерпан",
+        )
+
+    user_id = uuid.uuid4().hex
+    workspace_file = f"{user_id}.db"
+    try:
+        user = create_registered_user(
+            user_id=user_id,
+            username=display_username,
+            username_normalized=normalized,
+            password_hash_value=password_hash(password),
+            workspace_file=workspace_file,
+        )
+    except RegisteredUserExistsError:
+        raise HTTPException(status_code=409, detail="Такой логин уже занят") from None
+    except DatabaseError:
+        if get_registered_user(normalized) is not None:
+            raise HTTPException(
+                status_code=409, detail="Такой логин уже занят"
+            ) from None
+        raise
+
+    try:
+        _ensure_workspace_initialized(workspace_file)
+    except Exception as error:
+        delete_registered_user(user_id)
+        _remove_workspace_files(workspace_file)
+        logger.exception("Could not initialize a registered demo workspace")
+        raise HTTPException(
+            status_code=503,
+            detail="Не удалось создать демонстрационное рабочее пространство",
+        ) from error
+
+    touch_registered_user_login(user_id)
+    return _AuthContext(
+        username=str(user["username"]),
+        auth_kind="demo",
+        workspace_file=workspace_file,
+        target=_workspace_target(workspace_file),
+    )
+
+
+@app.post(
+    "/api/v1/auth/register",
+    response_model=LoginResponse,
+    status_code=201,
+)
+async def register(payload: RegisterRequest, request: Request, response: Response):
+    """Create an isolated, pre-seeded preview account and sign it in."""
+
+    rate_key = _auth_rate_key(request, "register")
+    limited, retry_after = await asyncio.to_thread(login_rate_limited, rate_key)
+    if limited:
+        raise HTTPException(
+            status_code=429,
+            detail="Слишком много попыток регистрации. Повторите позже.",
+            headers={"Retry-After": str(retry_after)},
+        )
+    # Count every registration attempt, not only failures: creating a
+    # workspace is intentionally more expensive than a normal login.
+    await asyncio.to_thread(record_login_failure, rate_key)
+    identity = await asyncio.to_thread(
+        _register_user_sync, payload.username, payload.password
+    )
+    token, expires_at = await asyncio.to_thread(
+        _create_session,
+        identity.username,
+        auth_kind=identity.auth_kind,
+        workspace_file=identity.workspace_file,
+    )
+    _set_session_cookie(response, token)
+    return {
+        "username": identity.username,
+        "expiresAt": iso(expires_at),
+        "demo": True,
+    }
+
+
 @app.post("/api/v1/auth/login", response_model=LoginResponse)
 async def login(payload: LoginRequest, request: Request, response: Response):
-    remote_host = request.client.host if request.client else "unknown"
-    rate_key = hashlib.sha256(remote_host.encode("utf-8")).hexdigest()
+    rate_key = _auth_rate_key(request)
     limited, retry_after = await asyncio.to_thread(login_rate_limited, rate_key)
     if limited:
         raise HTTPException(
@@ -830,26 +1116,39 @@ async def login(payload: LoginRequest, request: Request, response: Response):
             headers={"Retry-After": str(retry_after)},
         )
 
-    if not await asyncio.to_thread(
-        verify_admin, payload.username, payload.password
-    ):
+    identity = await asyncio.to_thread(
+        _authenticate_password_sync, payload.username, payload.password
+    )
+    if identity is None:
         await asyncio.to_thread(record_login_failure, rate_key)
         raise HTTPException(status_code=401, detail="Неверный логин или пароль")
 
     await asyncio.to_thread(clear_login_failures, rate_key)
-    username = os.getenv("ADMIN_USERNAME", "admin").strip()
-    token, expires_at = await asyncio.to_thread(_create_session, username)
+    token, expires_at = await asyncio.to_thread(
+        _create_session,
+        identity.username,
+        auth_kind=identity.auth_kind,
+        workspace_file=identity.workspace_file,
+    )
     _set_session_cookie(response, token)
-    return {"username": username, "expiresAt": iso(expires_at)}
+    return {
+        "username": identity.username,
+        "expiresAt": iso(expires_at),
+        "demo": identity.demo,
+    }
 
 
 @app.get("/api/v1/auth/me")
-async def me(username: str = Depends(current_user)):
-    return {"username": username}
+async def me(context: CurrentAuthContext):
+    return {
+        "username": context.username,
+        "authKind": context.auth_kind,
+        "demo": context.demo,
+    }
 
 
 def _delete_session(token: str) -> None:
-    with db() as connection:
+    with registry_db() as connection:
         connection.execute(
             "DELETE FROM sessions WHERE token_hash=?",
             (hashlib.sha256(token.encode("utf-8")).hexdigest(),),
@@ -1007,7 +1306,10 @@ async def events_stream(request: Request, _: str = Depends(current_user)):
     otherwise idle connection; no portfolio payload is resent every tick.
     """
 
+    workspace_target = active_database_target()
+
     async def generate():
+        set_active_database_target(workspace_target)
         await asyncio.to_thread(_analyzed_data)
         last_id = await asyncio.to_thread(latest_event_id)
         snapshot = await asyncio.to_thread(list_notifications, 12, False)
@@ -1079,7 +1381,7 @@ async def generate_demo_event(
 async def start_demo_simulator(
     payload: SimulatorStartRequest, _: str = Depends(current_user)
 ):
-    status = demo_simulator.start(
+    status = simulator_for().start(
         interval_seconds=payload.intervalSeconds,
         scenario=payload.scenario,
         customers_provider=lambda: _analyzed_data()[0],
@@ -1092,7 +1394,8 @@ async def start_demo_simulator(
 )
 async def stop_demo_simulator(_: str = Depends(current_user)):
     # stop() briefly joins the simulator thread; keep that wait off the loop.
-    return {"ok": True, "simulator": await asyncio.to_thread(demo_simulator.stop)}
+    simulator = simulator_for()
+    return {"ok": True, "simulator": await asyncio.to_thread(simulator.stop)}
 
 
 @app.post("/api/v1/demo/reset", response_model=DemoResetResponse)
@@ -1201,8 +1504,10 @@ async def realtime_stream(
     except (TypeError, ValueError):
         header_cursor = 0
     initial_cursor = max(last_event_id, header_cursor)
+    workspace_target = active_database_target()
 
     async def generate():
+        set_active_database_target(workspace_target)
         cursor = initial_cursor
         if cursor == 0:
             cursor = await asyncio.to_thread(latest_realtime_event_id)

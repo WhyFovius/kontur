@@ -43,6 +43,52 @@ paths:
           content:
             application/json:
               schema: { $ref: '#/components/schemas/Error' }
+  /api/v1/auth/register:
+    post:
+      tags: [Authentication]
+      summary: Create an isolated demo preview account
+      description: >-
+        Creates a registered preview user and signs it in. The account receives
+        a separate pre-seeded demo workspace; it does not read or modify the
+        administrator workspace.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/RegisterRequest' }
+      responses:
+        '201':
+          description: Demo account created; an HttpOnly session cookie is set.
+          headers:
+            Set-Cookie:
+              schema: { type: string }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/LoginResponse' }
+        '403':
+          description: Registration is disabled or the demo-account limit is reached.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '409':
+          description: Username is already taken.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '422': { $ref: '#/components/responses/ValidationError' }
+        '429':
+          description: Registration rate limit exceeded.
+          headers:
+            Retry-After:
+              schema: { type: integer }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '503':
+          description: The demo workspace could not be initialized.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
   /api/v1/auth/me:
     get:
       tags: [Authentication]
@@ -58,6 +104,8 @@ paths:
                 required: [username]
                 properties:
                   username: { type: string }
+                  authKind: { type: string, enum: [admin, demo] }
+                  demo: { type: boolean }
         '401': { $ref: '#/components/responses/Unauthorized' }
   /api/v1/auth/logout:
     post:
@@ -590,10 +638,19 @@ components:
         password: { type: string, minLength: 1, maxLength: 256, format: password }
     LoginResponse:
       type: object
-      required: [username, expiresAt]
+      required: [username, expiresAt, demo]
       properties:
         username: { type: string }
         expiresAt: { type: string, format: date-time }
+        demo: { type: boolean, default: false }
+    RegisterRequest:
+      type: object
+      additionalProperties: false
+      required: [username, password, demoAcknowledged]
+      properties:
+        username: { type: string, minLength: 3, maxLength: 32 }
+        password: { type: string, minLength: 8, maxLength: 256, format: password }
+        demoAcknowledged: { type: boolean, const: true }
     Customer:
       type: object
       required: [id, email, balance, totalReplenished, score, riskLevel, reasons, services, features, estimatedLoss, monthlyRevenue]
@@ -624,9 +681,15 @@ components:
         daysToExpiry: { type: [number, 'null'] }
     AuthProvidersResponse:
       type: object
-      required: [password, oidc]
+      required: [password, registration, oidc]
       properties:
         password: { type: boolean }
+        registration:
+          type: object
+          required: [enabled, demo]
+          properties:
+            enabled: { type: boolean }
+            demo: { type: boolean }
         oidc:
           type: object
           required: [enabled]

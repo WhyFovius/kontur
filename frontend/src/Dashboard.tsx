@@ -185,6 +185,7 @@ export function Dashboard() {
   const { theme, toggleTheme } = useTheme();
 
   const [username, setUsername] = useState("Аналитик");
+  const [demoAccount, setDemoAccount] = useState(false);
   const [summary, setSummary] = useState<Summary | null>(null);
   const [rescueQueue, setRescueQueue] = useState<RescueQueueData | null>(null);
   const [customers, setCustomers] = useState<CustomerListData>({ items: [], total: 0 });
@@ -464,9 +465,10 @@ export function Dashboard() {
     let cancelled = false;
     (async () => {
       try {
-        const me = await api<{ username: string }>("/api/v1/auth/me");
+        const me = await api<{ username: string; demo?: boolean }>("/api/v1/auth/me");
         if (cancelled) return;
         setUsername(me.username);
+        setDemoAccount(Boolean(me.demo));
         await refreshRef.current(true);
       } catch (error) {
         if (!cancelled) handleRefreshError(error, "Не удалось загрузить рабочее пространство");
@@ -1277,6 +1279,7 @@ export function Dashboard() {
         onNavigate={goToPage}
         customerCount={summary ? integer(summary.customerCount) : "—"}
         username={username}
+        roleLabel={demoAccount ? "Демо-предпросмотр" : "Команда маркетинга"}
         onLogout={() => void logout()}
       />
 

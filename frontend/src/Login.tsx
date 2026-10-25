@@ -4,9 +4,10 @@ import { useTheme } from "./theme";
 import { springEmphasized, springSnappy } from "./motion";
 import { ThemeToggle } from "./components/Chrome";
 import { AezaLogo, BrandPattern, MascotImage } from "./components/Brand";
-import { IconArrowUpRight, IconCheck, IconLock } from "./icons";
+import { IconArrowUpRight, IconCheck, IconClose, IconLock, IconShield } from "./icons";
 
 type Phase = "idle" | "loading" | "success";
+type AuthMode = "login" | "register";
 
 const lineReveal = {
   hidden: { y: "110%" },
@@ -24,6 +25,12 @@ export function Login() {
   const [invalid, setInvalid] = useState(false);
   const [phase, setPhase] = useState<Phase>("idle");
   const [oidc, setOidc] = useState<{ name: string; loginUrl: string } | null>(null);
+  const [mode, setMode] = useState<AuthMode>("login");
+  const [confirmPassword, setConfirmPassword] = useState("");
+  const [registrationEnabled, setRegistrationEnabled] = useState(false);
+  const [demoNoticeOpen, setDemoNoticeOpen] = useState(false);
+  const [demoAccepted, setDemoAccepted] = useState(false);
+  const demoCloseRef = useRef<HTMLButtonElement>(null);
   const submitLock = useRef(false);
   const shake = useAnimationControls();
 
@@ -41,6 +48,7 @@ export function Login() {
     fetch("/api/v1/auth/providers", { credentials: "same-origin" })
       .then((response) => (response.ok ? response.json() : null))
       .then((payload) => {
+        setRegistrationEnabled(Boolean(payload?.registration?.enabled));
         const provider = payload?.oidc;
         if (provider?.enabled && provider.loginUrl) {
           setOidc({
@@ -63,6 +71,31 @@ export function Login() {
     };
   }, [shake]);
 
+  useEffect(() => {
+    if (!demoNoticeOpen) return;
+    demoCloseRef.current?.focus();
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setDemoNoticeOpen(false);
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [demoNoticeOpen]);
+
+  const switchMode = (nextMode: AuthMode) => {
+    setMode(nextMode);
+    setError(null);
+    setInvalid(false);
+    setPassword("");
+    setConfirmPassword("");
+    window.setTimeout(() => document.getElementById("username")?.focus(), 60);
+  };
+
+  const continueToRegistration = () => {
+    if (!demoAccepted) return;
+    setDemoNoticeOpen(false);
+    switchMode("register");
+  };
+
   const fail = (message: string, credentials: boolean) => {
     setError(message);
     setInvalid(credentials);
@@ -75,26 +108,58 @@ export function Login() {
   const onSubmit = async (event: FormEvent) => {
     event.preventDefault();
     if (phase !== "idle" || submitLock.current) return;
+    const registering = mode === "register";
     if (!username.trim() || !password) {
       fail("Введите логин и пароль.", true);
       return;
+    }
+    if (registering) {
+      if (!demoAccepted) {
+        setDemoNoticeOpen(true);
+        return;
+      }
+      if (username.trim().length < 3) {
+        fail("Логин должен содержать не менее 3 символов.", true);
+        return;
+      }
+      if (password.length < 8) {
+        fail("Пароль должен содержать не менее 8 символов.", true);
+        return;
+      }
+      if (password !== confirmPassword) {
+        fail("Пароли не совпадают.", true);
+        document.getElementById("confirmPassword")?.focus();
+        return;
+      }
     }
     setError(null);
     setInvalid(false);
     submitLock.current = true;
     setPhase("loading");
     try {
-      const response = await fetch("/api/v1/auth/login", {
-        method: "POST",
-        credentials: "same-origin",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ username, password }),
-      });
-      const payload = (await response.json().catch(() => ({}))) as { detail?: string };
+      const response = await fetch(
+        registering ? "/api/v1/auth/register" : "/api/v1/auth/login",
+        {
+          method: "POST",
+          credentials: "same-origin",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(
+            registering
+              ? { username: username.trim(), password, demoAcknowledged: demoAccepted }
+              : { username, password },
+          ),
+        },
+      );
+      const payload = (await response.json().catch(() => ({}))) as {
+        detail?: unknown;
+      };
       if (!response.ok) {
         submitLock.current = false;
         setPhase("idle");
-        fail(payload.detail || "Не удалось войти. Проверьте логин и пароль.", true);
+        const fallback = registering
+          ? "Не удалось создать демо-аккаунт. Проверьте введённые данные."
+          : "Не удалось войти. Проверьте логин и пароль.";
+        fail(typeof payload.detail === "string" ? payload.detail : fallback, true);
         document.getElementById("password")?.focus();
         return;
       }
@@ -223,9 +288,17 @@ export function Login() {
           initial={{ opacity: 0, y: 24, scale: 0.985 }}
         >
           <div className="form-heading">
-            <span className="eyebrow">Рабочее пространство</span>
-            <h2 id="loginTitle">Войти в Aéza Контур</h2>
-            <p>Используйте учётные данные администратора.</p>
+            <span className="eyebrow">
+              {mode === "register" ? "Демо-предпросмотр" : "Рабочее пространство"}
+            </span>
+            <h2 id="loginTitle">
+              {mode === "register" ? "Создать демо-аккаунт" : "Войти в Aéza Контур"}
+            </h2>
+            <p>
+              {mode === "register"
+                ? "Откроется отдельная копия с уже внесёнными тестовыми данными."
+                : "Используйте аккаунт администратора или созданный демо-аккаунт."}
+            </p>
           </div>
 
           <div className="field">
@@ -255,7 +328,7 @@ export function Login() {
               id="password"
               name="password"
               type="password"
-              autoComplete="current-password"
+              autoComplete={mode === "register" ? "new-password" : "current-password"}
               required
               maxLength={256}
               placeholder=" "
@@ -270,6 +343,29 @@ export function Login() {
             />
             <label htmlFor="password">Пароль</label>
           </div>
+
+          {mode === "register" && (
+            <div className="field">
+              <input
+                id="confirmPassword"
+                name="confirmPassword"
+                type="password"
+                autoComplete="new-password"
+                required
+                maxLength={256}
+                placeholder=" "
+                value={confirmPassword}
+                aria-invalid={invalid || undefined}
+                aria-describedby={error ? "loginError" : undefined}
+                onChange={(event) => {
+                  setConfirmPassword(event.target.value);
+                  setInvalid(false);
+                  setError(null);
+                }}
+              />
+              <label htmlFor="confirmPassword">Повторите пароль</label>
+            </div>
+          )}
 
           <AnimatePresence initial={false}>
             {error && (
@@ -311,11 +407,11 @@ export function Login() {
             ) : phase === "loading" ? (
               <>
                 <md-circular-progress indeterminate class="login-progress" />
-                Проверяем данные…
+                {mode === "register" ? "Создаём пространство…" : "Проверяем данные…"}
               </>
             ) : (
               <>
-                Войти в панель
+                {mode === "register" ? "Создать и войти" : "Войти в панель"}
                 <span slot="icon" className="md-icon-wrap">
                   <IconArrowUpRight />
                 </span>
@@ -323,7 +419,7 @@ export function Login() {
             )}
           </md-filled-button>
 
-          {oidc && (
+          {mode === "login" && oidc && (
             <>
               <div className="login-divider" aria-hidden="true">
                 <span>или</span>
@@ -337,15 +433,123 @@ export function Login() {
             </>
           )}
 
+          {mode === "login" && registrationEnabled && (
+            <>
+              <div className="login-divider" aria-hidden="true">
+                <span>нет аккаунта</span>
+              </div>
+              <button
+                type="button"
+                className="login-register-button"
+                onClick={() => setDemoNoticeOpen(true)}
+              >
+                Создать демо-аккаунт
+              </button>
+            </>
+          )}
+
+          {mode === "register" && (
+            <button
+              type="button"
+              className="login-mode-switch"
+              onClick={() => switchMode("login")}
+            >
+              Уже есть аккаунт? Войти
+            </button>
+          )}
+
           <p className="login-footnote">
             <IconLock /> Сессия хранится в защищённой cookie
           </p>
         </motion.form>
         <footer className="login-footer">
           <span>Aéza · Контур удержания</span>
-          <span>Доступ по приглашению</span>
+          <span>{registrationEnabled ? "Доступен демо-предпросмотр" : "Доступ по приглашению"}</span>
         </footer>
       </section>
+
+      <AnimatePresence>
+        {demoNoticeOpen && (
+          <motion.div
+            className="demo-modal-backdrop"
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            onMouseDown={(event) => {
+              if (event.target === event.currentTarget) setDemoNoticeOpen(false);
+            }}
+          >
+            <motion.section
+              className="demo-modal"
+              role="dialog"
+              aria-modal="true"
+              aria-labelledby="demoNoticeTitle"
+              aria-describedby="demoNoticeText"
+              initial={{ opacity: 0, y: 26, scale: 0.97 }}
+              animate={{ opacity: 1, y: 0, scale: 1 }}
+              exit={{ opacity: 0, y: 14, scale: 0.98 }}
+              transition={springEmphasized}
+            >
+              <button
+                ref={demoCloseRef}
+                type="button"
+                className="demo-modal-close"
+                aria-label="Закрыть предупреждение"
+                onClick={() => setDemoNoticeOpen(false)}
+              >
+                <IconClose />
+              </button>
+              <span className="demo-modal-icon" aria-hidden="true">
+                <IconShield />
+              </span>
+              <span className="eyebrow">Перед регистрацией</span>
+              <h3 id="demoNoticeTitle">Это чисто предпросмотр функций</h3>
+              <div id="demoNoticeText" className="demo-modal-copy">
+                <p>
+                  Для вас будет создана отдельная демонстрационная копия
+                  «Контура». Внутри уже внесены тестовые клиенты, услуги и
+                  транзакции — можно сразу смотреть риск, очередь спасения и
+                  Live-монитор.
+                </p>
+                <p>
+                  Все функции работают полностью: меняйте веса модели,
+                  загружайте свой JSON-снимок, запускайте симулятор и
+                  проверяйте уведомления. Изменения останутся только в вашей
+                  демо-копии и не являются боевыми данными Aéza.
+                </p>
+              </div>
+              <label className="demo-check">
+                <input
+                  type="checkbox"
+                  checked={demoAccepted}
+                  onChange={(event) => setDemoAccepted(event.target.checked)}
+                />
+                <span>
+                  Понимаю, что это демо-предпросмотр с тестовыми данными
+                </span>
+              </label>
+              <div className="demo-modal-actions">
+                <button
+                  type="button"
+                  className="demo-modal-button demo-modal-button-ghost"
+                  onClick={() => setDemoNoticeOpen(false)}
+                >
+                  Отмена
+                </button>
+                <button
+                  type="button"
+                  className="demo-modal-button demo-modal-button-primary"
+                  disabled={!demoAccepted}
+                  onClick={continueToRegistration}
+                >
+                  Продолжить
+                  <IconArrowUpRight />
+                </button>
+              </div>
+            </motion.section>
+          </motion.div>
+        )}
+      </AnimatePresence>
     </div>
   );
 }

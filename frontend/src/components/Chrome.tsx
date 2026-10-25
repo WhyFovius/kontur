@@ -106,6 +106,7 @@ interface SidebarProps {
   onNavigate: (section: SectionId) => void;
   customerCount: string;
   username: string;
+  roleLabel?: string;
   onLogout: () => void;
   collapsed: boolean;
   onToggleSidebar: () => void;
@@ -116,6 +117,7 @@ export function Sidebar({
   onNavigate,
   customerCount,
   username,
+  roleLabel,
   onLogout,
   collapsed,
   onToggleSidebar,
@@ -218,7 +220,7 @@ export function Sidebar({
           </div>
           <div className="profile-info">
             <strong>{username || "Аналитик"}</strong>
-            <span>Команда маркетинга</span>
+            <span>{roleLabel || "Команда маркетинга"}</span>
           </div>
           <md-icon-button onClick={onLogout} aria-label="Выйти из аккаунта" title="Выйти">
             <span className="md-icon-wrap">
