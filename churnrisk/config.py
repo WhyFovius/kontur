@@ -29,6 +29,18 @@ def _positive_float_env(name: str, default: float) -> float:
     return value if math.isfinite(value) and value > 0 else default
 
 
+def _bool_env(name: str, default: bool) -> bool:
+    raw = os.getenv(name)
+    if raw is None:
+        return default
+    normalized = raw.strip().casefold()
+    if normalized in {"1", "true", "yes", "on"}:
+        return True
+    if normalized in {"0", "false", "no", "off"}:
+        return False
+    return default
+
+
 DATABASE_POOL_MAX = _positive_int_env("DATABASE_POOL_MAX", 10)
 DATABASE_CONNECT_TIMEOUT_SECONDS = _positive_float_env(
     "DATABASE_CONNECT_TIMEOUT_SECONDS", 5.0
@@ -47,3 +59,15 @@ MAX_SERVICES = 500_000
 MAX_TRANSACTIONS = 1_000_000
 LOGIN_ATTEMPT_LIMIT = 8
 LOGIN_WINDOW_SECONDS = 15 * 60
+
+# Public self-registration creates an isolated, pre-seeded demo
+# workspace (a separate SQLite file per registered user).  It never
+# grants access to the administrator's workspace.  Operators who do
+# not want a public preview can disable sign-ups with
+# PUBLIC_REGISTRATION_ENABLED=false; existing environment/OIDC admin
+# login is unaffected either way.
+PUBLIC_REGISTRATION_ENABLED = _bool_env("PUBLIC_REGISTRATION_ENABLED", True)
+MAX_REGISTERED_USERS = _positive_int_env("MAX_REGISTERED_USERS", 200)
+DEMO_WORKSPACE_DIR = Path(
+    os.getenv("DEMO_WORKSPACE_DIR", str(DATABASE_PATH.parent / "workspaces"))
+).expanduser()

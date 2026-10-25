@@ -1,6 +1,7 @@
 import hashlib
 import time
 import unittest
+import uuid
 from datetime import timedelta
 from pathlib import Path
 
@@ -430,6 +431,141 @@ class ApiTests(unittest.TestCase):
         )
         self.assertEqual(response.status_code, 422)
         self.assertEqual(self.client.get("/api/v1/customers").json()["total"], 3)
+
+    def test_public_registration_creates_isolated_seeded_demo_workspace(self):
+        suffix = uuid.uuid4().hex[:10]
+        username_a = f"demo-a-{suffix}"
+        username_b = f"demo-b-{suffix}"
+        password = "demo-password-2026"
+
+        providers = self.client.get("/api/v1/auth/providers").json()
+        self.assertTrue(providers["registration"]["enabled"])
+        self.assertTrue(providers["registration"]["demo"])
+
+        unacknowledged = TestClient(app).post(
+            "/api/v1/auth/register",
+            json={
+                "username": f"demo-no-{suffix}",
+                "password": password,
+                "demoAcknowledged": False,
+            },
+        )
+        self.assertEqual(unacknowledged.status_code, 422)
+
+        client_a = TestClient(app)
+        registered_a = client_a.post(
+            "/api/v1/auth/register",
+            json={
+                "username": username_a,
+                "password": password,
+                "demoAcknowledged": True,
+            },
+        )
+        self.assertEqual(registered_a.status_code, 201, registered_a.text)
+        self.assertTrue(registered_a.json()["demo"])
+        self.assertTrue(client_a.cookies.get("churn_session"))
+        self.assertTrue(client_a.get("/api/v1/auth/me").json()["demo"])
+
+        # A fresh preview workspace is pre-seeded, unlike the admin's
+        # three-account fixture that setUp installed in the main DB.
+        self.assertEqual(client_a.get("/api/v1/customers").json()["total"], 8)
+        self.assertEqual(
+            client_a.get("/api/v1/analytics/summary").json()["customerCount"], 8
+        )
+        self.assertEqual(
+            client_a.get("/api/v1/model/settings").json()["weights"]["prolong_wait"],
+            25,
+        )
+
+        changed = client_a.patch(
+            "/api/v1/model/settings", json={"weights": {"prolong_wait": 41}}
+        )
+        self.assertEqual(changed.status_code, 200, changed.text)
+        replaced = client_a.put(
+            "/api/v1/source/snapshot",
+            json={
+                "accounts": [
+                    {"id": 7001, "email": "only@example.org", "balance": 100}
+                ],
+                "services": [],
+                "transactions": [],
+            },
+        )
+        self.assertEqual(replaced.status_code, 200, replaced.text)
+        self.assertEqual(client_a.get("/api/v1/customers").json()["total"], 1)
+
+        client_b = TestClient(app)
+        registered_b = client_b.post(
+            "/api/v1/auth/register",
+            json={
+                "username": username_b,
+                "password": password,
+                "demoAcknowledged": True,
+            },
+        )
+        self.assertEqual(registered_b.status_code, 201, registered_b.text)
+        self.assertEqual(client_b.get("/api/v1/customers").json()["total"], 8)
+        self.assertEqual(
+            client_b.get("/api/v1/model/settings").json()["weights"]["prolong_wait"],
+            25,
+        )
+
+        # The full product surface works in B's own seeded copy.
+        self.assertEqual(
+            client_b.get("/api/v1/analytics/rescue-queue").status_code, 200
+        )
+        realtime_status = client_b.get("/api/v1/realtime/status")
+        self.assertEqual(realtime_status.status_code, 200, realtime_status.text)
+        self.assertEqual(realtime_status.json()["trackedCustomers"], 8)
+        generated = client_b.post(
+            "/api/v1/demo/generate",
+            json={
+                "scenario": "NORMAL_ACTIVITY",
+                "customerId": "10482",
+                "eventId": f"evt-registration-{suffix}",
+            },
+        )
+        self.assertEqual(generated.status_code, 200, generated.text)
+        started = client_b.post(
+            "/api/v1/demo/simulator/start",
+            json={"intervalSeconds": 60, "scenario": "MIXED"},
+        )
+        self.assertEqual(started.status_code, 200, started.text)
+        self.assertTrue(started.json()["simulator"]["running"])
+        stopped = client_b.post("/api/v1/demo/simulator/stop")
+        self.assertFalse(stopped.json()["simulator"]["running"])
+
+        # Neither preview user touched the administrator workspace.
+        self.assertEqual(self.client.get("/api/v1/customers").json()["total"], 3)
+
+        # A preview account persists and can sign in again later.
+        self.assertEqual(client_a.post("/api/v1/auth/logout").status_code, 200)
+        login_again = client_a.post(
+            "/api/v1/auth/login",
+            json={"username": username_a, "password": password},
+        )
+        self.assertEqual(login_again.status_code, 200, login_again.text)
+        self.assertTrue(login_again.json()["demo"])
+        self.assertEqual(client_a.get("/api/v1/customers").json()["total"], 1)
+
+        duplicate = TestClient(app).post(
+            "/api/v1/auth/register",
+            json={
+                "username": username_a.upper(),
+                "password": password,
+                "demoAcknowledged": True,
+            },
+        )
+        self.assertEqual(duplicate.status_code, 409)
+        reserved = TestClient(app).post(
+            "/api/v1/auth/register",
+            json={
+                "username": "test-admin",
+                "password": password,
+                "demoAcknowledged": True,
+            },
+        )
+        self.assertEqual(reserved.status_code, 422)
 
     def test_security_headers_health_and_logout(self):
         response = self.client.get("/health")

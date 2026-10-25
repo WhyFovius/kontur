@@ -21,6 +21,7 @@ import sqlite3
 import threading
 from collections.abc import Callable, Iterable, Iterator, Mapping, Sequence
 from contextlib import contextmanager
+from contextvars import ContextVar, Token
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -503,6 +504,59 @@ def database_identity() -> str:
     return _database_target().identity
 
 
+# Registered preview users work in isolated SQLite workspace files.
+# Authentication resolves the session's workspace once per request and
+# publishes it through this context variable; every ordinary ``db()``
+# call in that request (including ``asyncio.to_thread`` workers, which
+# inherit the context) then transparently uses the user's workspace.
+# Registry/authentication queries explicitly opt out with
+# ``ignore_active=True`` so sessions and accounts always live in the
+# configured main database.
+_ACTIVE_TARGET: ContextVar[_DatabaseTarget | None] = ContextVar(
+    "kontur_active_database_target", default=None
+)
+
+
+def sqlite_database_target(path: Path | str) -> _DatabaseTarget:
+    target = str(Path(path).expanduser())
+    return _DatabaseTarget("sqlite", target, f"sqlite:{target}")
+
+
+def active_database_target() -> _DatabaseTarget:
+    return _ACTIVE_TARGET.get() or _database_target()
+
+
+def active_database_identity() -> str:
+    return active_database_target().identity
+
+
+def set_active_database_target(
+    target: _DatabaseTarget | None,
+) -> Token[_DatabaseTarget | None]:
+    return _ACTIVE_TARGET.set(target)
+
+
+def reset_active_database_target(token: Token[_DatabaseTarget | None]) -> None:
+    _ACTIVE_TARGET.reset(token)
+
+
+@contextmanager
+def use_database_target(
+    target: _DatabaseTarget | None,
+) -> Iterator[_DatabaseTarget]:
+    token = set_active_database_target(target)
+    try:
+        yield active_database_target()
+    finally:
+        reset_active_database_target(token)
+
+
+@contextmanager
+def use_sqlite_database(path: Path | str) -> Iterator[_DatabaseTarget]:
+    with use_database_target(sqlite_database_target(path)) as target:
+        yield target
+
+
 _SQLITE_MEMORY_URI = "file:kontur-memory?mode=memory&cache=shared"
 _SQLITE_MEMORY_ANCHOR: sqlite3.Connection | None = None
 _SQLITE_MEMORY_LOCK = threading.Lock()
@@ -642,10 +696,26 @@ def _postgres_pool(url: str) -> _PostgresPool:
 
 
 @contextmanager
-def database_connection() -> Iterator[Connection]:
-    """Open a short-lived transaction and always release its connection."""
+def database_connection(
+    *,
+    target: _DatabaseTarget | None = None,
+    ignore_active: bool = False,
+) -> Iterator[Connection]:
+    """Open a short-lived transaction and always release its connection.
 
-    target = _database_target()
+    With no arguments this uses the request's active workspace target
+    when one is set (registered preview users), otherwise the
+    configured main database.  ``ignore_active=True`` always selects
+    the configured main/registry database.
+    """
+
+    if target is not None:
+        chosen = target
+    elif ignore_active:
+        chosen = _database_target()
+    else:
+        chosen = active_database_target()
+    target = chosen
     release = None
     if target.dialect == "sqlite":
         raw: Any = _connect_sqlite(target.target)
@@ -715,7 +785,7 @@ def checkpoint_database() -> None:
 
     if database_dialect() != "sqlite":
         return
-    with database_connection() as connection:
+    with database_connection(ignore_active=True) as connection:
         connection.execute("PRAGMA wal_checkpoint(TRUNCATE)").fetchone()
 
 
@@ -729,7 +799,7 @@ def close_database_pools() -> None:
 
 
 def database_healthcheck() -> None:
-    with database_connection() as connection:
+    with database_connection(ignore_active=True) as connection:
         connection.execute("SELECT 1").fetchone()
 
 

@@ -4,6 +4,7 @@ import json
 import math
 import re
 from datetime import UTC, datetime, timedelta
+from functools import partial
 from typing import Any
 
 from .config import (
@@ -26,8 +27,12 @@ from .domain import (
 
 # Kept as the storage module's public connection factory for existing
 # imports.  The implementation now lives in churnrisk.database and may
-# return either SQLite or pooled PostgreSQL connections.
+# return either SQLite or pooled PostgreSQL connections.  Ordinary
+# ``db()`` calls follow the active per-request workspace; ``registry_db``
+# always addresses the configured main database that owns accounts,
+# sessions and login rate limits.
 db = database_connection
+registry_db = partial(database_connection, ignore_active=True)
 
 
 class SnapshotValidationError(ValueError):
@@ -875,13 +880,13 @@ def _rate_key_attempts(connection: Connection, key: str) -> tuple[bool, int]:
 
 
 def login_rate_limited(key: str) -> tuple[bool, int]:
-    with db() as connection:
+    with registry_db() as connection:
         return _rate_key_attempts(connection, key)
 
 
 def record_login_failure(key: str) -> None:
     now = utcnow().timestamp()
-    with db() as connection:
+    with registry_db() as connection:
         connection.execute(
             "DELETE FROM login_attempts WHERE window_started<?",
             (now - LOGIN_WINDOW_SECONDS,),
@@ -902,7 +907,7 @@ def record_login_failure(key: str) -> None:
 
 
 def clear_login_failures(key: str) -> None:
-    with db() as connection:
+    with registry_db() as connection:
         connection.execute("DELETE FROM login_attempts WHERE key=?", (key,))
 
 
@@ -920,6 +925,152 @@ def _table_columns(connection: Connection, table: str) -> set[str]:
             (table,),
         ).fetchall()
     }
+
+
+class RegisteredUserExistsError(ValueError):
+    """The normalized preview username is already taken."""
+
+
+def ensure_auth_schema(connection: Connection) -> None:
+    """Create the public-preview account registry and session columns.
+
+    Accounts and sessions live in the configured main database.  A
+    registered session additionally stores the file name of that
+    user's isolated demo workspace; the administrator/OIDC session
+    keeps ``workspace_file`` empty and therefore uses the main data.
+    """
+
+    connection.execute(
+        """
+        CREATE TABLE IF NOT EXISTS registered_users (
+            id TEXT PRIMARY KEY,
+            username TEXT NOT NULL,
+            username_normalized TEXT NOT NULL UNIQUE,
+            password_hash TEXT NOT NULL,
+            workspace_file TEXT NOT NULL,
+            created_at TEXT NOT NULL,
+            last_login_at TEXT
+        )
+        """
+    )
+    connection.execute(
+        "CREATE INDEX IF NOT EXISTS registered_users_created_idx "
+        "ON registered_users(created_at)"
+    )
+    connection.execute(
+        """
+        CREATE TABLE IF NOT EXISTS sessions (
+            token_hash TEXT PRIMARY KEY,
+            username TEXT NOT NULL,
+            expires_at TEXT NOT NULL
+        )
+        """
+    )
+    existing = _table_columns(connection, "sessions")
+    if "auth_kind" not in existing:
+        connection.execute(
+            "ALTER TABLE sessions ADD COLUMN auth_kind TEXT NOT NULL DEFAULT 'admin'"
+        )
+    if "workspace_file" not in existing:
+        connection.execute(
+            "ALTER TABLE sessions ADD COLUMN workspace_file TEXT"
+        )
+
+
+def _registered_user_dict(row: Any) -> dict[str, Any]:
+    return {
+        "id": str(row["id"]),
+        "username": str(row["username"]),
+        "usernameNormalized": str(row["username_normalized"]),
+        "passwordHash": str(row["password_hash"]),
+        "workspaceFile": str(row["workspace_file"]),
+        "createdAt": str(row["created_at"]),
+        "lastLoginAt": (
+            str(row["last_login_at"]) if row["last_login_at"] is not None else None
+        ),
+    }
+
+
+def count_registered_users() -> int:
+    with registry_db() as connection:
+        ensure_auth_schema(connection)
+        row = connection.execute(
+            "SELECT COUNT(*) AS total FROM registered_users"
+        ).fetchone()
+    return int(row["total"] or 0) if row is not None else 0
+
+
+def get_registered_user(username_normalized: str) -> dict[str, Any] | None:
+    with registry_db() as connection:
+        ensure_auth_schema(connection)
+        row = connection.execute(
+            "SELECT id, username, username_normalized, password_hash, "
+            "workspace_file, created_at, last_login_at "
+            "FROM registered_users WHERE username_normalized=?",
+            (username_normalized,),
+        ).fetchone()
+    return _registered_user_dict(row) if row is not None else None
+
+
+def create_registered_user(
+    *,
+    user_id: str,
+    username: str,
+    username_normalized: str,
+    password_hash_value: str,
+    workspace_file: str,
+) -> dict[str, Any]:
+    created_at = iso(utcnow())
+    with registry_db() as connection:
+        ensure_auth_schema(connection)
+        existing = connection.execute(
+            "SELECT 1 FROM registered_users WHERE username_normalized=?",
+            (username_normalized,),
+        ).fetchone()
+        if existing is not None:
+            raise RegisteredUserExistsError(username_normalized)
+        connection.execute(
+            """
+            INSERT INTO registered_users (
+                id, username, username_normalized, password_hash,
+                workspace_file, created_at, last_login_at
+            ) VALUES (?, ?, ?, ?, ?, ?, NULL)
+            """,
+            (
+                user_id,
+                username,
+                username_normalized,
+                password_hash_value,
+                workspace_file,
+                created_at,
+            ),
+        )
+    return {
+        "id": user_id,
+        "username": username,
+        "usernameNormalized": username_normalized,
+        "passwordHash": password_hash_value,
+        "workspaceFile": workspace_file,
+        "createdAt": created_at,
+        "lastLoginAt": None,
+    }
+
+
+def delete_registered_user(user_id: str) -> None:
+    with registry_db() as connection:
+        ensure_auth_schema(connection)
+        connection.execute(
+            "DELETE FROM registered_users WHERE id=?", (user_id,)
+        )
+
+
+def touch_registered_user_login(user_id: str) -> None:
+    with registry_db() as connection:
+        ensure_auth_schema(connection)
+        connection.execute(
+            "UPDATE registered_users SET last_login_at=? WHERE id=?",
+            (iso(utcnow()), user_id),
+        )
 
 
 def _ensure_snapshot_fact_columns(connection: Connection) -> None:
@@ -1048,7 +1199,7 @@ def init_db() -> None:
             status TEXT NOT NULL DEFAULT ''
         );
         CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT NOT NULL);
-        CREATE TABLE IF NOT EXISTS sessions (token_hash TEXT PRIMARY KEY, username TEXT NOT NULL, expires_at TEXT NOT NULL);
+        CREATE TABLE IF NOT EXISTS sessions (token_hash TEXT PRIMARY KEY, username TEXT NOT NULL, expires_at TEXT NOT NULL, auth_kind TEXT NOT NULL DEFAULT 'admin', workspace_file TEXT);
         CREATE TABLE IF NOT EXISTS metadata (key TEXT PRIMARY KEY, value TEXT NOT NULL);
         CREATE TABLE IF NOT EXISTS login_attempts (key TEXT PRIMARY KEY, window_started REAL NOT NULL, attempts INTEGER NOT NULL);
         CREATE TABLE IF NOT EXISTS oidc_states (state_hash TEXT PRIMARY KEY, nonce TEXT NOT NULL, code_verifier TEXT NOT NULL, expires_at TEXT NOT NULL);
@@ -1084,6 +1235,7 @@ def init_db() -> None:
         CREATE INDEX IF NOT EXISTS login_attempts_window_idx ON login_attempts(window_started);
         """)
         _ensure_snapshot_fact_columns(connection)
+        ensure_auth_schema(connection)
         connection.execute(
             "INSERT OR IGNORE INTO settings (key, value) VALUES ('weights', ?)",
             (json.dumps(DEFAULT_WEIGHTS),),

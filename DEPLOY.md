@@ -6,6 +6,7 @@
 Интернет → Caddy (80/443, автоматический HTTPS)
          → churn-risk (127.0.0.1:8000, один Uvicorn-процесс)
          → SQLite в именованном Docker volume kontur-data
+           (+ отдельные SQLite-копии демо-предпросмотра в workspaces/)
 ```
 
 Для одного сервера PostgreSQL не обязателен: SQLite с WAL достаточен,
@@ -64,6 +65,14 @@ chmod 600 .env.production
   `openssl rand -base64 24`;
 - `COOKIE_SECURE=true` для публичного HTTPS.
 
+Публичная регистрация по умолчанию включена как демо-предпросмотр.
+Посетитель сначала видит обязательное предупреждение, затем получает
+отдельную предзаполненную SQLite-копию со всеми функциями; рабочее
+пространство администратора ему недоступно. Для этого режима можно
+изменить `MAX_REGISTERED_USERS` (по умолчанию 200) или полностью
+отключить новые регистрации через `PUBLIC_REGISTRATION_ENABLED=false`.
+Копии лежат в `/app/data/workspaces` внутри того же Docker volume.
+
 Файл `.env.production` уже игнорируется Git и Docker build context —
 не коммитьте его и не отправляйте в чаты.
 
@@ -106,7 +115,10 @@ curl -fsS https://ВАШ_ДОМЕН/health
 
 Ожидается JSON со статусом приложения. После этого откройте
 `https://ВАШ_ДОМЕН`, войдите под `ADMIN_USERNAME`/`ADMIN_PASSWORD` и
-загрузите реальный JSON-снимок через интерфейс.
+загрузите реальный JSON-снимок через интерфейс. Отдельно проверьте
+кнопку «Создать демо-аккаунт»: новый пользователь должен попасть не в
+административные данные, а в свою предзаполненную копию с профилем
+«Демо-предпросмотр».
 
 Загрузчик снимка принимает экспортные формы `bonusState` и
 `autoprolong`: boolean, числа, строки вида `active`/`off`/
@@ -200,10 +212,13 @@ cd /opt/kontur
 ls -lh backups/
 ```
 
-Скрипт делает online-backup через SQLite Backup API, копирует файл в
-`./backups/` на хост и удаляет копии старше 14 дней. Регулярно
-выгружайте бэкапы с сервера в другое место: бэкап только на том же VPS
-не защищает от потери самого сервера.
+Скрипт делает online-backup через SQLite Backup API и пишет один архив
+`kontur-YYYYMMDD-HHMMSS.tar.gz` в `./backups/` на хосте. В архиве
+лежат основная БД `churn.db` (администраторское пространство,
+зарегистрированные пользователи и сессии) и каталог `workspaces/` со
+всеми изолированными демо-копиями. Копии старше 14 дней удаляются.
+Регулярно выгружайте бэкапы с сервера в другое место: бэкап только на
+том же VPS не защищает от потери самого сервера.
 
 Пример cron на 03:15:
 
@@ -213,19 +228,55 @@ ls -lh backups/
 
 ### Восстановление SQLite
 
-Сначала сделайте бэкап текущего состояния. Затем:
+Сначала сделайте бэкап текущего состояния. Затем распакуйте нужный
+архив на хосте во временный каталог и потоково передайте его содержимое
+в одноразовый контейнер — так восстановленные файлы создадутся от
+пользователя приложения, а не от root:
 
 ```bash
 cd /opt/kontur
 export COMPOSE="docker compose -f docker-compose.prod.yml --env-file .env.production"
 
+restore_dir="$(mktemp -d)"
+tar -xzf ./backups/kontur-YYYYMMDD-HHMMSS.tar.gz -C "$restore_dir"
+
 $COMPOSE stop churn-risk
-$COMPOSE run --rm --no-deps -T churn-risk sh -c \
-  'cat > /app/data/churn.db.restore && mv /app/data/churn.db.restore /app/data/churn.db && rm -f /app/data/churn.db-wal /app/data/churn.db-shm' \
-  < ./backups/kontur-YYYYMMDD-HHMMSS.db
+tar -cf - -C "$restore_dir" . | $COMPOSE run --rm --no-deps -T churn-risk python -c '
+import io
+import sys
+import tarfile
+from pathlib import Path
+
+root = Path("/app/data")
+(root / "workspaces").mkdir(parents=True, exist_ok=True)
+allowed = {"churn.db"}
+with tarfile.open(fileobj=io.BytesIO(sys.stdin.buffer.read()), mode="r:") as archive:
+    for member in archive.getmembers():
+        name = member.name.removeprefix("./")
+        if not member.isfile():
+            continue
+        if name not in allowed and not (
+            name.startswith("workspaces/") and name.endswith(".db") and "/" not in name[11:]
+        ):
+            raise SystemExit(f"unexpected backup member: {member.name}")
+        source = archive.extractfile(member)
+        if source is None:
+            continue
+        target = root / name
+        temporary = target.with_suffix(target.suffix + ".restore")
+        temporary.write_bytes(source.read())
+        temporary.replace(target)
+        for suffix in ("-wal", "-shm"):
+            Path(str(target) + suffix).unlink(missing_ok=True)
+'
+rm -rf "$restore_dir"
 $COMPOSE up -d churn-risk
 curl -fsS https://ВАШ_ДОМЕН/health
 ```
+
+Старые бэкапы формата `kontur-*.db` содержат только основную БД: их
+можно восстановить прежним способом, но демо-пространства из них не
+появятся.
 
 ## PostgreSQL вместо SQLite
 
@@ -245,7 +296,10 @@ docker compose -f docker-compose.prod.yml \
 
 Автоматической миграции данных SQLite → PostgreSQL в проекте нет.
 Для PostgreSQL используйте `pg_dump`/`pg_restore`, а не
-`deploy/backup.sh`.
+`deploy/backup.sh`. Учтите: даже при PostgreSQL изолированные
+демо-пространства остаются отдельными SQLite-файлами в
+`/app/data/workspaces`, поэтому этот каталог нужно архивировать
+отдельно от дампа PostgreSQL.
 
 ## Диагностика
 

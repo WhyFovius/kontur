@@ -442,3 +442,182 @@
   }
   .mock-bars { min-height: 52px; }
 }
+
+/* Public preview registration. The administrator form stays compact;
+   the legal/demo explanation is an explicit modal step before a
+   visitor can switch into registration mode. */
+.login-register-button,
+.login-mode-switch {
+  width: 100%;
+  min-height: 48px;
+  margin-top: 14px;
+  border-radius: var(--shape-full);
+  font: inherit;
+  font-size: 14.5px;
+  font-weight: 800;
+  cursor: pointer;
+  transition: background .2s var(--motion-standard), border-color .2s var(--motion-standard), transform .16s var(--motion-standard);
+}
+.login-register-button {
+  border: 1.5px solid var(--md-primary);
+  background: transparent;
+  color: var(--md-primary);
+}
+.login-register-button:hover {
+  background: color-mix(in srgb, var(--md-primary) 10%, transparent);
+}
+.login-register-button:active,
+.login-mode-switch:active { transform: scale(.985); }
+.login-mode-switch {
+  border: 0;
+  background: color-mix(in srgb, var(--md-primary) 10%, transparent);
+  color: var(--md-primary);
+}
+.login-mode-switch:hover {
+  background: color-mix(in srgb, var(--md-primary) 16%, transparent);
+}
+.login-register-button:focus-visible,
+.login-mode-switch:focus-visible,
+.demo-modal-button:focus-visible,
+.demo-modal-close:focus-visible,
+.demo-check input:focus-visible {
+  outline: 3px solid color-mix(in srgb, var(--md-primary) 45%, transparent);
+  outline-offset: 3px;
+}
+
+.demo-modal-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 120;
+  display: grid;
+  place-items: center;
+  padding: 22px;
+  background: rgba(0, 0, 0, .52);
+}
+.demo-modal {
+  position: relative;
+  width: min(560px, 100%);
+  max-height: min(720px, calc(100dvh - 44px));
+  overflow: auto;
+  padding: 34px 36px 30px;
+  border-radius: var(--shape-xxl);
+  border: 1px solid color-mix(in srgb, var(--md-outline-variant) 75%, transparent);
+  background: var(--md-surface-lowest);
+  color: var(--md-on-surface);
+  box-shadow: var(--elevation-3);
+}
+.demo-modal-close {
+  position: absolute;
+  top: 18px;
+  right: 18px;
+  width: 42px;
+  height: 42px;
+  display: grid;
+  place-items: center;
+  border: 0;
+  border-radius: 50%;
+  background: var(--md-surface-container);
+  color: var(--md-on-surface-variant);
+  cursor: pointer;
+}
+.demo-modal-close svg { width: 19px; height: 19px; }
+.demo-modal-icon {
+  width: 58px;
+  height: 58px;
+  display: grid;
+  place-items: center;
+  margin-bottom: 20px;
+  border-radius: 50%;
+  background: var(--brand-sky);
+  color: #001a26;
+}
+.demo-modal-icon svg { width: 29px; height: 29px; }
+.demo-modal h3 {
+  margin: 10px 48px 14px 0;
+  font-family: var(--font-display);
+  font-size: clamp(26px, 5vw, 36px);
+  line-height: 1.08;
+  letter-spacing: -.03em;
+}
+.demo-modal-copy {
+  display: grid;
+  gap: 12px;
+  color: var(--md-on-surface-variant);
+  font-size: 15px;
+  line-height: 1.55;
+}
+.demo-modal-copy p { margin: 0; }
+.demo-check {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  margin-top: 24px;
+  padding: 16px;
+  border-radius: var(--shape-lg);
+  background: var(--md-surface-container);
+  font-size: 14px;
+  font-weight: 700;
+  line-height: 1.45;
+  cursor: pointer;
+}
+.demo-check input {
+  flex: none;
+  width: 22px;
+  height: 22px;
+  margin: 1px 0 0;
+  accent-color: var(--md-primary);
+  cursor: pointer;
+}
+.demo-modal-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 12px;
+  margin-top: 26px;
+}
+.demo-modal-button {
+  min-height: 50px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 0 22px;
+  border-radius: var(--shape-full);
+  font: inherit;
+  font-size: 14.5px;
+  font-weight: 850;
+  cursor: pointer;
+}
+.demo-modal-button svg { width: 17px; height: 17px; }
+.demo-modal-button-ghost {
+  border: 1.5px solid var(--md-outline-variant);
+  background: transparent;
+  color: var(--md-on-surface-variant);
+}
+.demo-modal-button-primary {
+  border: 0;
+  background: var(--md-primary);
+  color: var(--md-on-primary);
+  box-shadow: 0 14px 28px -14px color-mix(in srgb, var(--md-primary) 70%, transparent);
+}
+.demo-modal-button-primary:disabled {
+  cursor: not-allowed;
+  opacity: .45;
+  box-shadow: none;
+}
+@media (max-width: 560px) {
+  .demo-modal-backdrop { padding: 14px; }
+  .demo-modal {
+    max-height: calc(100dvh - 28px);
+    padding: 24px 20px 20px;
+  }
+  .demo-modal-icon {
+    width: 48px;
+    height: 48px;
+    margin-bottom: 14px;
+  }
+  .demo-modal-icon svg { width: 24px; height: 24px; }
+  .demo-modal h3 { margin-bottom: 12px; }
+  .demo-check { margin-top: 18px; padding: 14px; }
+  .demo-modal-actions { flex-direction: column-reverse; margin-top: 18px; }
+  .demo-modal-button { width: 100%; }
+}

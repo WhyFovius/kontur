@@ -15,8 +15,11 @@ from .database import (
     DatabaseError,
     Row,
     acquire_schema_lock,
+    active_database_identity,
+    active_database_target,
     mark_schema_ready,
     schema_is_ready,
+    use_database_target,
 )
 from .domain import RISK_THRESHOLDS, iso, parse_date, rescue_queue, utcnow
 from .storage import db, load_account
@@ -1137,7 +1140,7 @@ def realtime_metric_counts() -> dict[str, int]:
     counts = {
         "demo_events": int(demo_events or 0),
         "live_events": int(live_events or 0),
-        "simulator_running": int(simulator.running),
+        "simulator_running": int(simulator_for().running),
         "simulated_sent": 0,
         "queued": 0,
         "no_channel": 0,
@@ -1199,7 +1202,7 @@ def list_reaction_outbox(limit: int = 50) -> list[dict[str, Any]]:
 
 
 def reset_demo_data() -> dict[str, int]:
-    simulator.stop()
+    simulator_for().stop()
     with db() as connection:
         ensure_realtime_tables(connection)
         ensure_alert_tables(connection)
@@ -1217,9 +1220,11 @@ def reset_demo_data() -> dict[str, int]:
 
 
 class DemoSimulator:
-    """One daemon thread; database events are the source of truth."""
+    """One daemon thread per workspace; DB events are the source of truth."""
 
-    def __init__(self) -> None:
+    def __init__(self, workspace_identity: str | None = None) -> None:
+        self.workspace_identity = workspace_identity
+        self._target: Any = None
         self._lock = threading.Lock()
         self._stop = threading.Event()
         self._thread: threading.Thread | None = None
@@ -1259,6 +1264,8 @@ class DemoSimulator:
             self.interval_seconds = max(2.0, min(60.0, float(interval_seconds)))
             self.scenario = scenario if scenario == "MIXED" or scenario in DEMO_SCENARIOS else "MIXED"
             self._provider = customers_provider
+            self._target = active_database_target()
+            self.workspace_identity = self._target.identity
             self._stop.clear()
             self.last_error = None
             self.started_at = iso(utcnow())
@@ -1277,6 +1284,12 @@ class DemoSimulator:
             return self.status()
 
     def _run(self) -> None:
+        # A plain Thread does not inherit the request context, so pin
+        # this simulator to the workspace target captured at start().
+        with use_database_target(self._target):
+            self._run_loop()
+
+    def _run_loop(self) -> None:
         while not self._stop.is_set():
             try:
                 if self._provider is None:
@@ -1293,7 +1306,36 @@ class DemoSimulator:
                 break
 
 
-simulator = DemoSimulator()
+_simulators: dict[str, DemoSimulator] = {}
+_simulators_lock = threading.Lock()
+
+
+def simulator_for(workspace_identity: str | None = None) -> DemoSimulator:
+    """Return the simulator bound to one workspace database."""
+
+    identity = workspace_identity or active_database_identity()
+    with _simulators_lock:
+        current = _simulators.get(identity)
+        if current is None:
+            if len(_simulators) >= 64:
+                for old_identity, old_simulator in list(_simulators.items()):
+                    if not old_simulator.running:
+                        del _simulators[old_identity]
+                        break
+            current = DemoSimulator(identity)
+            _simulators[identity] = current
+        return current
+
+
+def stop_all_simulators() -> None:
+    with _simulators_lock:
+        simulators = list(_simulators.values())
+    for current in simulators:
+        current.stop()
+
+
+# Backwards-compatible handle for the configured/main workspace.
+simulator = simulator_for()
 
 
 def realtime_status(customers: list[dict[str, Any]]) -> dict[str, Any]:
@@ -1313,7 +1355,7 @@ def realtime_status(customers: list[dict[str, Any]]) -> dict[str, Any]:
     return {
         "generatedAt": iso(utcnow()),
         "sources": [adapter.status() for adapter in SOURCE_ADAPTERS],
-        "simulator": simulator.status(),
+        "simulator": simulator_for().status(),
         "scenarios": [
             {"id": scenario, "label": SCENARIO_LABELS[scenario]} for scenario in DEMO_SCENARIOS
         ],

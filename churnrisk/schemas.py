@@ -15,6 +15,34 @@ class LoginRequest(BaseModel):
     password: str = Field(min_length=1, max_length=256)
 
 
+class RegisterRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    username: str = Field(min_length=3, max_length=32)
+    password: str = Field(min_length=8, max_length=256)
+    demoAcknowledged: bool
+
+    @field_validator("username")
+    @classmethod
+    def validate_username(cls, value: str) -> str:
+        username = value.strip()
+        if len(username) < 3:
+            raise ValueError("Логин должен содержать не менее 3 символов")
+        if any(
+            character.isspace() or character in "/\\<>\"'"
+            for character in username
+        ):
+            raise ValueError("Логин не должен содержать пробелы или служебные символы")
+        return username
+
+    @field_validator("demoAcknowledged")
+    @classmethod
+    def validate_demo_acknowledged(cls, value: bool) -> bool:
+        if value is not True:
+            raise ValueError("Подтвердите, что это демонстрационный предпросмотр")
+        return value
+
+
 class SnapshotRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -61,6 +89,7 @@ class SettingsPatch(BaseModel):
 class LoginResponse(BaseModel):
     username: str
     expiresAt: str
+    demo: bool = False
 
 
 class CustomerResponse(BaseModel):
@@ -142,8 +171,14 @@ class OidcProviderInfo(BaseModel):
     loginUrl: str | None = None
 
 
+class RegistrationInfo(BaseModel):
+    enabled: bool
+    demo: bool = True
+
+
 class AuthProvidersResponse(BaseModel):
     password: bool
+    registration: RegistrationInfo
     oidc: OidcProviderInfo
 
 
