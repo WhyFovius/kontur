@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import math
+import re
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
@@ -211,13 +212,55 @@ _TRUE_VALUES = {
     "active",
     "activated",
     "available",
+    "connected",
+    "participating",
+    "participant",
+    "member",
+    "subscribed",
+    "opted in",
+    "opt in",
+    "has bonus",
+    "bonus active",
+    "bonus enabled",
+    "allowed",
+    "allow",
+    "auto",
+    "automatic",
+    "ok",
+    "present",
     "да",
+    "есть",
+    "истина",
+    "авто",
+    "автоматически",
     "включено",
     "включен",
+    "включена",
+    "включены",
     "активен",
     "активна",
     "активно",
-    "истина",
+    "активный",
+    "активная",
+    "активное",
+    "активные",
+    "активирован",
+    "активирована",
+    "активировано",
+    "активированы",
+    "подключен",
+    "подключена",
+    "подключено",
+    "подключены",
+    "доступен",
+    "доступна",
+    "доступно",
+    "доступны",
+    "участвует",
+    "разрешен",
+    "разрешена",
+    "разрешено",
+    "разрешены",
 }
 _FALSE_VALUES = {
     "false",
@@ -231,43 +274,188 @@ _FALSE_VALUES = {
     "inactive",
     "deactivated",
     "unavailable",
+    "disconnected",
+    "not active",
+    "not enabled",
+    "not available",
+    "opted out",
+    "opt out",
+    "denied",
+    "deny",
+    "manual",
+    "none",
+    "null",
+    "nil",
+    "missing",
+    "absent",
+    "-",
     "нет",
+    "ложь",
+    "вручную",
+    "ручное",
     "выключено",
     "выключен",
+    "выключена",
+    "выключены",
     "неактивен",
     "неактивна",
     "неактивно",
-    "ложь",
+    "неактивный",
+    "неактивная",
+    "неактивное",
+    "неактивные",
+    "деактивирован",
+    "деактивирована",
+    "деактивировано",
+    "деактивированы",
+    "отключен",
+    "отключена",
+    "отключено",
+    "отключены",
+    "недоступен",
+    "недоступна",
+    "недоступно",
+    "недоступны",
+    "не участвует",
+    "нет бонуса",
+    "запрещен",
+    "запрещена",
+    "запрещено",
+    "запрещены",
     "",
 }
+_FALSE_STEMS = (
+    "неактив",
+    "не актив",
+    "не включ",
+    "не подключ",
+    "недоступ",
+    "не доступ",
+    "отключ",
+    "выключ",
+    "деактив",
+    "inactive",
+    "disabled",
+    "disconnected",
+    "unavailable",
+    "not active",
+    "not enabled",
+    "not available",
+)
+_TRUE_STEMS = (
+    "актив",
+    "включ",
+    "подключ",
+    "доступ",
+    "участв",
+    "разреш",
+    "active",
+    "enabled",
+    "available",
+    "connected",
+    "participat",
+    "subscribed",
+    "allowed",
+)
 
 
-def _boolean(value: Any, field: str) -> bool:
-    """Accept the boolean spellings real exported snapshots actually use.
-
-    The domain intentionally checks ``bonusState is True``; normalization is
-    therefore the one place where strings such as ``"active"``, ``"on"``,
-    numeric flags and small status objects become a real bool. Unknown
-    values still fail the whole snapshot instead of being guessed.
-    """
+def _parse_boolean(value: Any) -> bool | None:
+    """Best-effort parse of the flag spellings found in billing exports."""
     if isinstance(value, bool):
         return value
     if value is None:
         return False
-    if isinstance(value, (int, float)) and value in (0, 1):
-        return bool(value)
+    if isinstance(value, (int, float)):
+        return value != 0 if math.isfinite(value) else None
     if isinstance(value, str):
-        normalized = value.strip().casefold().replace("ё", "е")
+        normalized = value.strip().strip("\"'").casefold().replace("ё", "е")
+        normalized = re.sub(r"[\s_-]+", " ", normalized).strip(" .;")
         if normalized in _TRUE_VALUES:
             return True
         if normalized in _FALSE_VALUES:
             return False
+        if re.fullmatch(r"[+-]?(?:\d+(?:[.,]\d*)?|[.,]\d+)", normalized):
+            return float(normalized.replace(",", ".")) != 0
+        if any(stem in normalized for stem in _FALSE_STEMS):
+            return False
+        if any(stem in normalized for stem in _TRUE_STEMS):
+            return True
+        return None
     if isinstance(value, dict):
-        lowered = {str(key).strip().casefold(): item for key, item in value.items()}
-        for key in ("active", "enabled", "isactive", "isenabled", "value", "state", "status"):
+        if not value:
+            return False
+        lowered = {
+            re.sub(
+                r"[^0-9a-zа-я]+",
+                "",
+                str(key).strip().casefold().replace("ё", "е"),
+            ): item
+            for key, item in value.items()
+        }
+        # MongoDB Extended JSON wrappers used by canonical exports.
+        for key in ("boolean", "numberint", "numberlong", "numberdouble", "numberdecimal"):
             if key in lowered:
-                return _boolean(lowered[key], field)
-    raise SnapshotValidationError(f"{field}: ожидается true или false")
+                return _parse_boolean(lowered[key])
+        for key in (
+            "active",
+            "isactive",
+            "enabled",
+            "isenabled",
+            "bonusstate",
+            "bonusactive",
+            "bonusenabled",
+            "isbonusactive",
+            "state",
+            "status",
+            "value",
+            "current",
+            "flag",
+            "on",
+        ):
+            if key in lowered:
+                parsed = _parse_boolean(lowered[key])
+                if parsed is not None:
+                    return parsed
+        for key, item in lowered.items():
+            if any(marker in key for marker in ("active", "enabled", "актив", "включ")):
+                parsed = _parse_boolean(item)
+                if parsed is not None:
+                    return parsed
+        for key in ("percent", "percentage", "rate", "amount", "balance"):
+            if key in lowered:
+                parsed = _parse_boolean(lowered[key])
+                if parsed is not None:
+                    return parsed
+        return None
+    if isinstance(value, (list, tuple, set)):
+        if not value:
+            return False
+        parsed_values = [_parse_boolean(item) for item in value]
+        if any(item is True for item in parsed_values):
+            return True
+        if any(item is False for item in parsed_values):
+            return False
+    return None
+
+
+def _boolean(value: Any, field: str, *, default: bool | None = None) -> bool:
+    """Normalize an export flag to a real bool.
+
+    The domain intentionally checks ``bonusState is True``; normalization
+    is therefore the one place where strings such as ``"active"``,
+    ``"подключена"``, ``"1.0"``, Mongo wrappers and small status objects
+    become a bool. Optional flags pass ``default=False``: an
+    uninterpretable spelling must not reject the whole snapshot upload,
+    it simply does not count as switched on.
+    """
+    parsed = _parse_boolean(value)
+    if parsed is not None:
+        return parsed
+    if default is not None:
+        return default
+    raise SnapshotValidationError(
+        f"{field}: ожидается true или false, получено {value!r:.80}"
+    )
 
 
 def _account_rows(rows: Any) -> tuple[list[dict[str, Any]], set[str]]:
@@ -303,8 +491,11 @@ def _account_rows(rows: Any) -> tuple[list[dict[str, Any]], set[str]]:
             if field in account:
                 account[field] = _money(account[field], f"accounts[{index}].{field}")
         if "bonusState" in account:
+            # An unknown bonus-programme spelling must never block the
+            # whole snapshot: bonuses are counted only for a recognised
+            # "on" value, everything else normalizes to False.
             account["bonusState"] = _boolean(
-                account["bonusState"], f"accounts[{index}].bonusState"
+                account["bonusState"], f"accounts[{index}].bonusState", default=False
             )
         normalized.append(account)
     return normalized, identifiers
@@ -375,7 +566,9 @@ def _related_rows(
             item["paymentTerm"] = term
             if "autoprolong" in item:
                 item["autoprolong"] = _boolean(
-                    item["autoprolong"], f"services[{index}].autoprolong"
+                    item["autoprolong"],
+                    f"services[{index}].autoprolong",
+                    default=False,
                 )
             expiration = item.get("expiresAt")
             if expiration not in (None, ""):

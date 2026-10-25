@@ -13,6 +13,7 @@ agy.exe
 data/*.db
 data/*.db-shm
 data/*.db-wal
+backups/
 
 # Frontend toolchain (the built bundle in static/app IS committed on purpose:
 # the Python-only Docker image serves it without a Node build stage)
