@@ -2,6 +2,7 @@
 .env.*
 !.env.example
 data/
+backups/
 .tools/
 agy.exe
 __pycache__/

@@ -359,6 +359,58 @@ class ApiTests(unittest.TestCase):
                 self.assertEqual(response.status_code, 422, response.text)
                 self.assertEqual(self.client.get("/api/v1/customers").json()["total"], 1)
 
+    def test_snapshot_upload_accepts_export_bonus_state_spellings(self):
+        response = self.client.put(
+            "/api/v1/source/snapshot",
+            json={
+                "accounts": [
+                    {
+                        "id": 501,
+                        "email": "bonus-on@example.org",
+                        "balance": 0,
+                        "bonusBalance": 1000,
+                        "bonusState": "Подключена",
+                    },
+                    {
+                        "id": 502,
+                        "email": "bonus-unknown@example.org",
+                        "balance": 0,
+                        "bonusBalance": 1000,
+                        "bonusState": "неизвестный экспортный статус",
+                    },
+                ],
+                "services": [
+                    {
+                        "id": "s-501",
+                        "accountId": 501,
+                        "status": "active",
+                        "price": 100,
+                        "paymentTerm": "month",
+                        "autoprolong": "Подключено",
+                    },
+                    {
+                        "id": "s-502",
+                        "accountId": 502,
+                        "status": "active",
+                        "price": 100,
+                        "paymentTerm": "month",
+                        "autoprolong": "off",
+                    },
+                ],
+                "transactions": [],
+            },
+        )
+        self.assertEqual(response.status_code, 200, response.text)
+        customers = self.client.get(
+            "/api/v1/customers?sort=id&order=asc"
+        ).json()
+        self.assertEqual(customers["total"], 2)
+        self.assertEqual(
+            [row["availableBalance"] for row in customers["items"]],
+            [1000, 0],
+        )
+        self.assertIs(customers["items"][0]["services"][0]["autoprolong"], True)
+
     def test_invalid_snapshot_does_not_delete_current_data(self):
         response = self.client.put(
             "/api/v1/source/snapshot",

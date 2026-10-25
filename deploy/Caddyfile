@@ -1,0 +1,12 @@
+{$SITE_DOMAIN} {
+	encode zstd gzip
+
+	request_body {
+		max_size 32MB
+	}
+
+	reverse_proxy churn-risk:8000 {
+		# Do not buffer Server-Sent Events from the realtime monitor.
+		flush_interval -1
+	}
+}

@@ -131,6 +131,26 @@ class DomainTests(unittest.TestCase):
                     "email": "object@example.org",
                     "bonusState": {"enabled": "yes"},
                 },
+                {
+                    "id": 5,
+                    "email": "mongo@example.org",
+                    "bonusState": {"$numberInt": "1"},
+                },
+                {"id": 6, "email": "ru@example.org", "bonusState": "Подключена"},
+                {"id": 7, "email": "negated@example.org", "bonusState": "не активна"},
+                {"id": 8, "email": "float@example.org", "bonusState": "1.0"},
+                {"id": 9, "email": "two@example.org", "bonusState": 2},
+                {
+                    "id": 10,
+                    "email": "unknown@example.org",
+                    "bonusState": "совершенно неизвестный статус",
+                },
+                {"id": 11, "email": "empty@example.org", "bonusState": []},
+                {
+                    "id": 12,
+                    "email": "mongolong@example.org",
+                    "bonusState": {"$numberLong": "0"},
+                },
             ],
             "services": [
                 {
@@ -140,16 +160,25 @@ class DomainTests(unittest.TestCase):
                     "price": 100,
                     "paymentTerm": "month",
                     "autoprolong": "on",
-                }
+                },
+                {
+                    "id": "s2",
+                    "accountId": 2,
+                    "status": "active",
+                    "price": 100,
+                    "paymentTerm": "month",
+                    "autoprolong": "manual",
+                },
             ],
             "transactions": [],
         }
         normalized = validate_snapshot(snapshot)
         self.assertEqual(
             [row["bonusState"] for row in normalized["accounts"]],
-            [True, False, True, True],
+            [True, False, True, True, True, True, False, True, True, False, False, False],
         )
         self.assertIs(normalized["services"][0]["autoprolong"], True)
+        self.assertIs(normalized["services"][1]["autoprolong"], False)
 
     def test_invalid_relationship_rejects_whole_snapshot(self):
         with self.assertRaises(SnapshotValidationError):
