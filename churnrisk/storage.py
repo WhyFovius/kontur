@@ -227,6 +227,9 @@ _TRUE_VALUES = {
     "has bonus",
     "bonus active",
     "bonus enabled",
+    "bonus unlocked",
+    "unlocked",
+    "unlock",
     "allowed",
     "allow",
     "auto",
@@ -266,6 +269,10 @@ _TRUE_VALUES = {
     "разрешена",
     "разрешено",
     "разрешены",
+    "разблокирован",
+    "разблокирована",
+    "разблокировано",
+    "разблокированы",
 }
 _FALSE_VALUES = {
     "false",
@@ -285,6 +292,9 @@ _FALSE_VALUES = {
     "not available",
     "opted out",
     "opt out",
+    "bonus locked",
+    "locked",
+    "lock",
     "denied",
     "deny",
     "manual",
@@ -327,6 +337,10 @@ _FALSE_VALUES = {
     "запрещена",
     "запрещено",
     "запрещены",
+    "заблокирован",
+    "заблокирована",
+    "заблокировано",
+    "заблокированы",
     "",
 }
 _FALSE_STEMS = (
@@ -511,6 +525,7 @@ def _related_rows(
     table: str,
     account_ids: set[str],
     encoded: list[str] | None = None,
+    service_owners: dict[str, str] | None = None,
 ) -> list[dict[str, Any]]:
     max_rows = MAX_SERVICES if table == "services" else MAX_TRANSACTIONS
     if not isinstance(rows, list) or len(rows) > max_rows:
@@ -524,6 +539,24 @@ def _related_rows(
         if table == "services"
         else {"performed", "not_performed"}
     )
+    owner_fields = (
+        "accountId",
+        "account_id",
+        "userId",
+        "user_id",
+        "customerId",
+        "customer_id",
+        "clientId",
+        "client_id",
+        "ownerId",
+        "owner_id",
+    )
+    service_fields = (
+        "serviceId",
+        "service_id",
+        "subscriptionId",
+        "subscription_id",
+    )
     for index, source in enumerate(rows):
         if not isinstance(source, dict):
             raise SnapshotValidationError(f"{table}[{index}] должен быть объектом")
@@ -534,8 +567,48 @@ def _related_rows(
         if identifier in seen_ids:
             raise SnapshotValidationError(f"Повторяется id в {table}: {identifier}")
         seen_ids.add(identifier)
-        owner_value = item.get("accountId", item.get("userId", item.get("account_id")))
+        owner_value = next(
+            (item[field] for field in owner_fields if item.get(field) is not None),
+            None,
+        )
+        service_reference: str | None = None
+        if table == "transactions":
+            raw_service_id = next(
+                (
+                    item[field]
+                    for field in service_fields
+                    if item.get(field) is not None
+                ),
+                None,
+            )
+            if raw_service_id is not None:
+                service_reference = _identifier(
+                    raw_service_id, f"transactions[{index}].serviceId"
+                )
+                item["serviceId"] = service_reference
+                for field in service_fields[1:]:
+                    item.pop(field, None)
+            if owner_value is None and service_reference is not None:
+                if not service_owners or service_reference not in service_owners:
+                    raise SnapshotValidationError(
+                        f"transactions[{index}] ссылается на отсутствующую "
+                        f"услугу {service_reference}"
+                    )
+                # Some billing exports link a transaction only to its
+                # service. The account is then unambiguously the owner
+                # of that already-validated service.
+                owner_value = service_owners[service_reference]
         owner = _identifier(owner_value, f"{table}[{index}].accountId")
+        if (
+            service_reference is not None
+            and service_owners
+            and service_reference in service_owners
+            and service_owners[service_reference] != owner
+        ):
+            raise SnapshotValidationError(
+                f"transactions[{index}].accountId не соответствует владельцу "
+                f"услуги {service_reference}"
+            )
         if owner not in account_ids:
             raise SnapshotValidationError(
                 f"{table}[{index}] ссылается на отсутствующий аккаунт {owner}"
@@ -549,8 +622,8 @@ def _related_rows(
         item["accountId"] = owner
         item["status"] = status
         item.pop("_id", None)
-        item.pop("userId", None)
-        item.pop("account_id", None)
+        for field in owner_fields[1:]:
+            item.pop(field, None)
         if "price" in item:
             item["price"] = _money(item["price"], f"{table}[{index}].price")
         if "amount" in item:
@@ -569,6 +642,11 @@ def _related_rows(
                     f"services[{index}].paymentTerm имеет неизвестное значение"
                 )
             item["paymentTerm"] = term
+            for alias in ("autoProlong", "auto_prolong", "autoRenew", "auto_renew"):
+                if alias in item:
+                    if "autoprolong" not in item:
+                        item["autoprolong"] = item[alias]
+                    item.pop(alias, None)
             if "autoprolong" in item:
                 item["autoprolong"] = _boolean(
                     item["autoprolong"],
@@ -644,6 +722,9 @@ def _validated_snapshot(
         "transactions",
         account_ids,
         encoded_transactions,
+        service_owners={
+            str(row["id"]): str(row["accountId"]) for row in services
+        },
     )
     if encoded_out is not None:
         encoded_out["accounts"] = [
