@@ -5,6 +5,12 @@
 		max_size 32MB
 	}
 
+	# Prometheus metrics describe the administrator workspace, so keep
+	# them off the public edge. They remain available to operators via
+	# http://127.0.0.1:8000/metrics on the server itself.
+	@metrics_path path /metrics
+	respond @metrics_path "Not Found" 404
+
 	reverse_proxy churn-risk:8000 {
 		# Do not buffer Server-Sent Events from the realtime monitor.
 		flush_interval -1
